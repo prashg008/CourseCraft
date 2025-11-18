@@ -133,7 +133,7 @@ function Login() {
                 required
               />
 
-              <div className="flex items-center justify-between">
+              <div className="flex items-center">
                 <label className="flex items-center">
                   <input
                     type="checkbox"
@@ -141,10 +141,6 @@ function Login() {
                   />
                   <span className="ml-2 text-sm text-gray-600">Remember me</span>
                 </label>
-
-                <a href="#" className="text-sm text-primary-600 hover:text-primary-500">
-                  Forgot password?
-                </a>
               </div>
 
               <Button
@@ -157,34 +153,8 @@ function Login() {
                 {loading ? 'Signing in...' : 'Sign in'}
               </Button>
             </form>
-
-            <div className="mt-6">
-              <div className="relative">
-                <div className="absolute inset-0 flex items-center">
-                  <div className="w-full border-t border-gray-300"></div>
-                </div>
-                <div className="relative flex justify-center text-sm">
-                  <span className="px-2 bg-white text-gray-500">Demo credentials</span>
-                </div>
-              </div>
-
-              <div className="mt-4 p-4 bg-blue-50 rounded-md border border-blue-200">
-                <p className="text-sm text-blue-800 font-medium mb-2">
-                  For testing, use any credentials:
-                </p>
-                <p className="text-xs text-blue-700">Email: any@example.com</p>
-                <p className="text-xs text-blue-700">Password: any password (min 6 chars)</p>
-              </div>
-            </div>
           </CardBody>
         </Card>
-
-        <p className="text-center text-sm text-gray-600 mt-8">
-          Don't have an account?{' '}
-          <a href="#" className="text-primary-600 hover:text-primary-500 font-medium">
-            Sign up
-          </a>
-        </p>
       </div>
     </div>
   );

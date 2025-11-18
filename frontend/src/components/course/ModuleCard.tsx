@@ -151,7 +151,7 @@ export function ModuleCard({
                   </>
                 )}
               </Button>
-              {/* <Button
+              <Button
                 variant="secondary"
                 size="sm"
                 onClick={() => onRegenerate(module.id)}
@@ -167,7 +167,7 @@ export function ModuleCard({
                   />
                 </svg>
                 Regenerate
-              </Button> */}
+              </Button>
             </div>
           </div>
         </div>

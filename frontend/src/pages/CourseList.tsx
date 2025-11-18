@@ -13,6 +13,7 @@ import {
 import { coursesApi } from '@/services/api';
 import { formatDateShort } from '@/utils/date';
 import { showError } from '@/utils/toast';
+import { useDebounce } from '@/hooks/useDebounce';
 import type { Course, CourseStatus, CourseFilters } from '@/types';
 
 function CourseList() {
@@ -28,12 +29,15 @@ function CourseList() {
 
   const pageSize = 6;
 
+  // Debounced search query to prevent excessive API calls
+  const debouncedSearch = useDebounce(search, 500);
+
   // Fetch courses
   const fetchCourses = async () => {
     setLoading(true);
     try {
       const filters: CourseFilters = {
-        search: search || undefined,
+        search: debouncedSearch || undefined,
         status: statusFilter,
         sortBy,
         sortOrder,
@@ -52,17 +56,17 @@ function CourseList() {
     }
   };
 
-  // Fetch on mount and when filters change
+  // Fetch on mount and when filters change (using debounced search)
   useEffect(() => {
     fetchCourses();
-  }, [search, statusFilter, sortBy, sortOrder, currentPage]);
+  }, [debouncedSearch, statusFilter, sortBy, sortOrder, currentPage]);
 
-  // Reset to page 1 when filters change
+  // Reset to page 1 when filters change (using debounced search)
   useEffect(() => {
     if (currentPage !== 1) {
       setCurrentPage(1);
     }
-  }, [search, statusFilter, sortBy, sortOrder]);
+  }, [debouncedSearch, statusFilter, sortBy, sortOrder]);
 
   // Get status badge variant
   const getStatusVariant = (status: CourseStatus) => {
