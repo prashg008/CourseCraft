@@ -1,7 +1,17 @@
 import { useState, useEffect, useCallback } from 'react';
+import type { FormEvent } from 'react';
 import { useParams, Link } from 'react-router-dom';
 import { MainLayout } from '@/components/layout';
-import { Button, Badge, Card, CardBody, LoadingSpinner } from '@/components/ui';
+import {
+  Button,
+  Badge,
+  Card,
+  CardBody,
+  LoadingSpinner,
+  ConfirmDialog,
+  Modal,
+  Input,
+} from '@/components/ui';
 import { GenerationStatus, ModuleCard, QuizSection } from '@/components/course';
 import { coursesApi, aiApi } from '@/services/api';
 import { formatDateWithTime } from '@/utils/date';
@@ -27,6 +37,14 @@ function CourseDetail() {
   const [regeneratingModuleId, setRegeneratingModuleId] = useState<string | null>(null);
   const [regeneratingQuiz, setRegeneratingQuiz] = useState(false);
   const [statusChanging, setStatusChanging] = useState(false);
+  const [pendingConfirm, setPendingConfirm] = useState<'archive' | 'regenerate-course' | null>(
+    null
+  );
+  const [confirmLoading, setConfirmLoading] = useState(false);
+  const [isEditModalOpen, setIsEditModalOpen] = useState(false);
+  const [savingDetails, setSavingDetails] = useState(false);
+  const [editForm, setEditForm] = useState({ title: '', description: '' });
+  const [editErrors, setEditErrors] = useState<{ title?: string; description?: string }>({});
 
   // Fetch course data
   const fetchCourse = useCallback(async () => {
@@ -47,12 +65,12 @@ function CourseDetail() {
   }, [fetchCourse]);
 
   // WebSocket connection for real-time generation updates
-  const { latestMessage } = useWebSocket<GenerationUpdate>({
+  useWebSocket<GenerationUpdate>({
     courseId: id,
     token,
     enabled: Boolean(id && token),
     retryLimit: -1,
-    onMessage: (update) => {
+    onMessage: update => {
       // When we get an update for module or quiz completion/failure, refresh course data
       if (update.status === 'completed' || update.status === 'failed') {
         fetchCourse();
@@ -111,23 +129,8 @@ function CourseDetail() {
   };
 
   // Handle archive course
-  const handleArchive = async () => {
-    if (!id || !course) return;
-
-    if (!confirm('Are you sure you want to archive this course?')) {
-      return;
-    }
-
-    setStatusChanging(true);
-    try {
-      await coursesApi.archive(id);
-      showSuccess('Course archived successfully');
-      fetchCourse();
-    } catch (error) {
-      showError(error instanceof Error ? error.message : 'Failed to archive course');
-    } finally {
-      setStatusChanging(false);
-    }
+  const handleArchive = () => {
+    setPendingConfirm('archive');
   };
 
   // Handle unarchive course
@@ -147,22 +150,98 @@ function CourseDetail() {
   };
 
   // Handle regenerate entire course
-  const handleRegenerateCourse = async () => {
-    if (!id || !course) return;
+  const handleRegenerateCourse = () => {
+    setPendingConfirm('regenerate-course');
+  };
 
-    if (!confirm('Are you sure you want to regenerate the entire course? This will replace all modules, lessons, and quiz questions with new AI-generated content.')) {
+  const openEditModal = () => {
+    if (!course) return;
+    setEditForm({ title: course.title, description: course.description });
+    setEditErrors({});
+    setIsEditModalOpen(true);
+  };
+
+  const closeEditModal = () => {
+    if (savingDetails) return;
+    setIsEditModalOpen(false);
+  };
+
+  const validateEditForm = () => {
+    const errors: { title?: string; description?: string } = {};
+    if (!editForm.title.trim()) {
+      errors.title = 'Title is required';
+    }
+    if (!editForm.description.trim()) {
+      errors.description = 'Description is required';
+    }
+    setEditErrors(errors);
+    return Object.keys(errors).length === 0;
+  };
+
+  const handleEditFieldChange = (field: 'title' | 'description', value: string) => {
+    setEditForm(prev => ({ ...prev, [field]: value }));
+    if (editErrors[field]) {
+      setEditErrors(prev => ({ ...prev, [field]: undefined }));
+    }
+  };
+
+  const handleCourseDetailsSubmit = async (event?: FormEvent<HTMLFormElement>) => {
+    event?.preventDefault();
+    if (!id || !validateEditForm()) {
       return;
     }
 
-    setStatusChanging(true);
+    setSavingDetails(true);
     try {
-      await aiApi.generateCourse(id);
-      showSuccess('Course regeneration started! Watch the progress below.');
-      fetchCourse();
+      await coursesApi.updateDetails(id, {
+        title: editForm.title.trim(),
+        description: editForm.description.trim(),
+      });
+      showSuccess('Course details updated successfully');
+      setIsEditModalOpen(false);
+      await fetchCourse();
     } catch (error) {
-      showError(error instanceof Error ? error.message : 'Failed to start course regeneration');
+      showError(error instanceof Error ? error.message : 'Failed to update course details');
     } finally {
+      setSavingDetails(false);
+    }
+  };
+
+  const closeConfirmDialog = () => {
+    if (confirmLoading) {
+      return;
+    }
+    setPendingConfirm(null);
+  };
+
+  const handleConfirmAction = async () => {
+    if (!id || !course || !pendingConfirm) {
+      return;
+    }
+
+    setConfirmLoading(true);
+    setStatusChanging(true);
+
+    try {
+      if (pendingConfirm === 'archive') {
+        await coursesApi.archive(id);
+        showSuccess('Course archived successfully');
+      } else {
+        await aiApi.generateCourse(id);
+        showSuccess('Course regeneration started! Watch the progress below.');
+      }
+
+      await fetchCourse();
+    } catch (error) {
+      const defaultMessage =
+        pendingConfirm === 'archive'
+          ? 'Failed to archive course'
+          : 'Failed to start course regeneration';
+      showError(error instanceof Error ? error.message : defaultMessage);
+    } finally {
+      setConfirmLoading(false);
       setStatusChanging(false);
+      setPendingConfirm(null);
     }
   };
 
@@ -247,6 +326,9 @@ function CourseDetail() {
 
             {/* Action Buttons */}
             <div className="flex items-center space-x-3 ml-4">
+              <Button variant="ghost" size="md" onClick={openEditModal} disabled={statusChanging}>
+                Edit Details
+              </Button>
               {course.status === 'draft' && (
                 <Button
                   variant="primary"
@@ -405,6 +487,55 @@ function CourseDetail() {
         {/* Modules Section */}
         <div>
           <h2 className="text-2xl font-bold text-gray-900 mb-4">Course Modules</h2>
+
+          <Modal
+            isOpen={isEditModalOpen}
+            onClose={closeEditModal}
+            title="Edit Course Details"
+            footer={
+              <>
+                <Button
+                  type="button"
+                  variant="secondary"
+                  onClick={closeEditModal}
+                  disabled={savingDetails}
+                >
+                  Cancel
+                </Button>
+                <Button
+                  type="submit"
+                  form="course-details-form"
+                  variant="primary"
+                  loading={savingDetails}
+                >
+                  Save Changes
+                </Button>
+              </>
+            }
+          >
+            <form
+              id="course-details-form"
+              className="space-y-4"
+              onSubmit={handleCourseDetailsSubmit}
+            >
+              <Input
+                label="Title"
+                placeholder="Course title"
+                value={editForm.title}
+                onChange={event => handleEditFieldChange('title', event.target.value)}
+                error={editErrors.title}
+              />
+              <Input
+                label="Description"
+                placeholder="Course description"
+                value={editForm.description}
+                onChange={event => handleEditFieldChange('description', event.target.value)}
+                error={editErrors.description}
+                variant="textarea"
+                rows={5}
+              />
+            </form>
+          </Modal>
           {course.modules.length === 0 ? (
             <Card>
               <CardBody>
@@ -441,6 +572,23 @@ function CourseDetail() {
           />
         </div>
       </div>
+      {pendingConfirm && (
+        <ConfirmDialog
+          isOpen={Boolean(pendingConfirm)}
+          title={pendingConfirm === 'archive' ? 'Archive course' : 'Regenerate course'}
+          message={
+            pendingConfirm === 'archive'
+              ? 'Are you sure you want to archive this course?'
+              : 'Are you sure you want to regenerate the entire course? This will replace all modules, lessons, and quiz questions with fresh AI-generated content.'
+          }
+          confirmLabel={pendingConfirm === 'archive' ? 'Archive course' : 'Regenerate course'}
+          cancelLabel="Cancel"
+          confirmVariant="danger"
+          loading={confirmLoading}
+          onConfirm={handleConfirmAction}
+          onCancel={closeConfirmDialog}
+        />
+      )}
     </MainLayout>
   );
 }

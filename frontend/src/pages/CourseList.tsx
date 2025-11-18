@@ -152,8 +152,8 @@ function CourseList() {
                 >
                   <option value="date-desc">Newest First</option>
                   <option value="date-asc">Oldest First</option>
-                  <option value="title-asc">Title (A-Z)</option>
-                  <option value="title-desc">Title (Z-A)</option>
+                  <option value="title-desc">Title (A-Z)</option>
+                  <option value="title-asc">Title (Z-A)</option>
                 </select>
               </div>
             </div>

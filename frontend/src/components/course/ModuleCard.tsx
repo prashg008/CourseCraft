@@ -1,4 +1,6 @@
 import { useState } from 'react';
+import ReactMarkdown from 'react-markdown';
+import type { Components } from 'react-markdown';
 import { Card, CardBody, Button, Badge } from '@/components/ui';
 import type { Module } from '@/types';
 
@@ -8,6 +10,22 @@ interface ModuleCardProps {
   onRegenerate: (moduleId: string) => void;
   isRegenerating?: boolean;
 }
+
+const markdownComponents: Components = {
+  a: ({ node: _node, className, children, ...props }) => {
+    void _node;
+    return (
+      <a
+        {...props}
+        target="_blank"
+        rel="noopener noreferrer"
+        className={[className, 'text-blue-600 underline'].filter(Boolean).join(' ')}
+      >
+        {children}
+      </a>
+    );
+  },
+};
 
 export function ModuleCard({
   module,
@@ -69,9 +87,11 @@ export function ModuleCard({
                   </div>
                 </div>
               </div>
-              <p className="text-sm text-gray-700 ml-[52px] leading-relaxed">
-                {module.description}
-              </p>
+              <div className="text-sm text-gray-700 ml-[52px] leading-relaxed prose prose-sm max-w-none">
+                <ReactMarkdown components={markdownComponents}>
+                  {module.description || ''}
+                </ReactMarkdown>
+              </div>
               <div className="flex items-center space-x-4 mt-3 ml-[52px] text-xs text-gray-600">
                 <span className="flex items-center px-2 py-1 bg-white rounded-md border border-gray-200">
                   <svg
@@ -196,13 +216,17 @@ export function ModuleCard({
                         {/* Lesson Content */}
                         <div className="ml-10 pl-2 border-l-2 border-gray-200">
                           {isLessonExpanded ? (
-                            <div className="mt-3 text-sm text-gray-700 whitespace-pre-wrap bg-white p-4 rounded-lg border border-gray-200 shadow-sm">
-                              {lesson.content}
+                            <div className="mt-3 text-sm text-gray-700 bg-white p-4 rounded-lg border border-gray-200 shadow-sm prose prose-sm max-w-none">
+                              <ReactMarkdown components={markdownComponents}>
+                                {lesson.content || ''}
+                              </ReactMarkdown>
                             </div>
                           ) : (
-                            <p className="text-sm text-gray-600 line-clamp-2 mt-2">
-                              {lesson.content}
-                            </p>
+                            <div className="text-sm text-gray-600 line-clamp-2 mt-2 prose prose-sm max-w-none">
+                              <ReactMarkdown components={markdownComponents}>
+                                {lesson.content || ''}
+                              </ReactMarkdown>
+                            </div>
                           )}
 
                           <button

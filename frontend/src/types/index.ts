@@ -14,7 +14,7 @@ export type QuestionType = 'mcq' | 'single_choice' | 'boolean';
 
 // Generation status
 export type GenerationStage = 'creating' | 'reviewing' | 'refining' | 'completed';
-export type GenerationStatus = 'pending' | 'running' | 'completed' | 'failed';
+export type GenerationStatus = 'pending' | 'running' | 'completed' | 'failed' | 'generating';
 
 // Answer interface
 export interface Answer {
@@ -117,6 +117,11 @@ export interface PaginatedResponse<T> {
 export interface CourseFormData {
   title: string;
   description: string;
+}
+
+export interface CourseUpdatePayload {
+  title?: string;
+  description?: string;
 }
 
 export interface QuestionFormData {

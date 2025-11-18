@@ -11,6 +11,7 @@ import type {
   PaginatedResponse,
   CourseFilters,
   CourseFormData,
+  CourseUpdatePayload,
   QuestionFormData,
   GenerationTask,
   RegenerationRequest,
@@ -210,6 +211,19 @@ export const coursesApi = {
         success: true,
         data: response.data,
         message: 'Course updated successfully',
+      };
+    } catch (error) {
+      throw handleApiError(error);
+    }
+  },
+
+  async updateDetails(id: string, data: CourseUpdatePayload): Promise<ApiResponse<Course>> {
+    try {
+      const response = await apiClient.patch(`/courses/${id}/details/`, data);
+      return {
+        success: true,
+        data: response.data,
+        message: 'Course details updated successfully',
       };
     } catch (error) {
       throw handleApiError(error);

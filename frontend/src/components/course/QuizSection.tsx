@@ -1,5 +1,13 @@
 import { useState } from 'react';
-import { Card, CardBody, Button, Badge, Modal, LoadingSpinner } from '@/components/ui';
+import {
+  Card,
+  CardBody,
+  Button,
+  Badge,
+  Modal,
+  LoadingSpinner,
+  ConfirmDialog,
+} from '@/components/ui';
 import { QuestionForm } from './QuestionForm';
 import { questionsApi } from '@/services/api';
 import { showSuccess, showError } from '@/utils/toast';
@@ -22,6 +30,8 @@ export function QuizSection({
   const [editingQuestion, setEditingQuestion] = useState<Question | undefined>();
   const [loading, setLoading] = useState(false);
   const [deletingId, setDeletingId] = useState<string | null>(null);
+  const [questionToDelete, setQuestionToDelete] = useState<Question | null>(null);
+  const [confirmingDelete, setConfirmingDelete] = useState(false);
 
   // Get question type badge
   const getQuestionTypeBadge = (type: string) => {
@@ -78,20 +88,35 @@ export function QuizSection({
   };
 
   // Handle question deletion
-  const handleDeleteQuestion = async (questionId: string) => {
-    if (!confirm('Are you sure you want to delete this question?')) {
+  const handleDeleteQuestion = (question: Question) => {
+    setQuestionToDelete(question);
+  };
+
+  const closeDeleteDialog = () => {
+    if (confirmingDelete) {
+      return;
+    }
+    setQuestionToDelete(null);
+  };
+
+  const confirmDeleteQuestion = async () => {
+    if (!questionToDelete) {
       return;
     }
 
-    setDeletingId(questionId);
+    setConfirmingDelete(true);
+    setDeletingId(questionToDelete.id);
+
     try {
-      await questionsApi.delete(questionId);
+      await questionsApi.delete(questionToDelete.id);
       showSuccess('Question deleted successfully');
       onUpdate(); // Refresh course data
     } catch (error) {
       showError(error instanceof Error ? error.message : 'Failed to delete question');
     } finally {
+      setConfirmingDelete(false);
       setDeletingId(null);
+      setQuestionToDelete(null);
     }
   };
 
@@ -126,8 +151,8 @@ export function QuizSection({
                         quiz.generationStatus === 'completed'
                           ? 'success'
                           : quiz.generationStatus === 'failed'
-                          ? 'error'
-                          : 'generating'
+                            ? 'error'
+                            : 'generating'
                       }
                     >
                       {quiz.generationStatus}
@@ -301,7 +326,7 @@ export function QuizSection({
                           </svg>
                         </button>
                         <button
-                          onClick={() => handleDeleteQuestion(question.id)}
+                          onClick={() => handleDeleteQuestion(question)}
                           disabled={isDeleting}
                           className="p-2 text-red-600 hover:text-red-700 hover:bg-red-50 rounded-md transition-colors disabled:opacity-50"
                           title="Delete question"
@@ -368,6 +393,22 @@ export function QuizSection({
           loading={loading}
         />
       </Modal>
+
+      <ConfirmDialog
+        isOpen={Boolean(questionToDelete)}
+        title="Delete question"
+        message={
+          questionToDelete
+            ? `Are you sure you want to delete "${questionToDelete.text}"? This action cannot be undone.`
+            : undefined
+        }
+        confirmLabel="Delete question"
+        cancelLabel="Cancel"
+        confirmVariant="danger"
+        loading={confirmingDelete}
+        onConfirm={confirmDeleteQuestion}
+        onCancel={closeDeleteDialog}
+      />
     </>
   );
 }

@@ -31,25 +31,13 @@ export function Sidebar({ isOpen, onClose }: SidebarProps) {
         </svg>
       ),
     },
-    {
-      path: '/courses/create',
-      label: 'Create Course',
-      icon: (
-        <svg className="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 4v16m8-8H4" />
-        </svg>
-      ),
-    },
   ];
 
   return (
     <>
       {/* Mobile Overlay */}
       {isOpen && (
-        <div
-          className="fixed inset-0 bg-black bg-opacity-50 z-40 lg:hidden"
-          onClick={onClose}
-        />
+        <div className="fixed inset-0 bg-black bg-opacity-50 z-40 lg:hidden" onClick={onClose} />
       )}
 
       {/* Sidebar */}
@@ -68,12 +56,14 @@ export function Sidebar({ isOpen, onClose }: SidebarProps) {
               <span className="text-xl font-bold text-gray-900">CourseCraft</span>
             </Link>
             {/* Close button for mobile */}
-            <button
-              onClick={onClose}
-              className="lg:hidden p-2 rounded-lg hover:bg-gray-100"
-            >
+            <button onClick={onClose} className="lg:hidden p-2 rounded-lg hover:bg-gray-100">
               <svg className="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
+                <path
+                  strokeLinecap="round"
+                  strokeLinejoin="round"
+                  strokeWidth={2}
+                  d="M6 18L18 6M6 6l12 12"
+                />
               </svg>
             </button>
           </div>
@@ -81,7 +71,7 @@ export function Sidebar({ isOpen, onClose }: SidebarProps) {
           {/* Navigation */}
           <nav className="flex-1 px-4 py-6 overflow-y-auto">
             <div className="space-y-1">
-              {navItems.map((item) => (
+              {navItems.map(item => (
                 <Link
                   key={item.path}
                   to={item.path}
