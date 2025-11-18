@@ -1,30 +1,28 @@
-[project]
+[tool.poetry]
 name = "coursecraft-backend"
 version = "0.1.0"
 description = "CourseCraft Backend API"
-authors = [
-    {name = "CourseCraft Team"}
-]
+authors = ["CourseCraft Team"]
 readme = "README.md"
-requires-python = "^3.11"
-dependencies = [
-    "django (>=5.2.8,<6.0.0)",
-    "psycopg2-binary (>=2.9.11,<3.0.0)",
-    "python-decouple (>=3.8,<4.0)",
-    "djangorestframework (>=3.16.1,<4.0.0)",
-    "djangorestframework-simplejwt (>=5.5.1,<6.0.0)",
-    "django-cors-headers (>=4.9.0,<5.0.0)",
-    "langchain (>=1.0.7,<2.0.0)",
-    "langchain-openai (>=1.0.3,<2.0.0)",
-    "openai (>=2.8.1,<3.0.0)",
-    "celery (>=5.5.3,<6.0.0)",
-    "channels (>=4.3.1,<5.0.0)",
-    "channels-redis (>=4.3.0,<5.0.0)",
-    "langchain-anthropic (>=1.1.0,<2.0.0)",
-    "langchain-google-genai (>=3.0.3,<4.0.0)",
-    "daphne (>=4.2.1,<5.0.0)",
-]
 
+[tool.poetry.dependencies]
+python = "^3.11"
+django = ">=5.2.8,<6.0.0"
+psycopg2-binary = ">=2.9.11,<3.0.0"
+python-decouple = ">=3.8,<4.0"
+djangorestframework = ">=3.16.1,<4.0.0"
+djangorestframework-simplejwt = ">=5.5.1,<6.0.0"
+django-cors-headers = ">=4.9.0,<5.0.0"
+langchain = ">=1.0.7,<2.0.0"
+langchain-openai = ">=1.0.3,<2.0.0"
+openai = ">=2.8.1,<3.0.0"
+celery = ">=5.5.3,<6.0.0"
+channels = ">=4.3.1,<5.0.0"
+channels-redis = ">=4.3.0,<5.0.0"
+langchain-anthropic = ">=1.1.0,<2.0.0"
+langchain-google-genai = ">=3.0.3,<4.0.0"
+daphne = ">=4.2.1,<5.0.0"
+gunicorn = "^22.0.0"
 
 [build-system]
 requires = ["poetry-core>=2.0.0,<3.0.0"]

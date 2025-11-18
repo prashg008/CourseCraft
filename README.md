@@ -26,6 +26,104 @@ CourseCraft/
 ├── .gitignore    # Git ignore rules
 ```
 
+## Architecture Overview
+
+```
+            Browser (http://localhost:8080)
+                       │
+                       ▼
+                ┌────────────┐
+                │   Nginx    │ Reverse proxy
+                └────┬───────┘
+          static /    │    \  /api,/ws
+        ┌─────────┐   │     ┌────────────┐
+        │ Frontend│◄──┘     │  Backend   │ (ASGI + Celery)
+        │ (Nginx) │         └────┬───────┘
+        └─────────┘              │
+                                  ▼
+                         ┌────────────┐
+                         │ PostgreSQL │
+                         └────────────┘
+                         ┌────────────┐
+                         │   Redis    │ (Celery + Channels)
+                         └────────────┘
+```
+
+- **backend**: Django ASGI app served by Gunicorn+Uvicorn, exposes REST + WebSockets.
+- **celery**: Worker that executes generation tasks; shares the exact code volume with `backend` for hot reload.
+- **frontend**: Static React bundle (Nginx) that Nginx proxies to; optional `frontend-dev` profile runs the Vite dev server.
+- **nginx**: Edge proxy that exposes a single public port, forwards `/api` + `/ws` to backend, and all other paths to the SPA.
+- **db / redis**: Stateful services with dedicated named volumes.
+
+## Environment Variables
+
+Copy `.env.example` to `.env` at the repo root and customize as needed:
+
+```bash
+cp .env.example .env
+```
+
+Key values (all of them ship with sensible defaults in the example file):
+
+| Variable                 | Purpose                                                                                                                                           |
+| ------------------------ | ------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `SECRET_KEY`             | Django secret; change before deploying.                                                                                                           |
+| `DEBUG`                  | Turns on Django debug features inside the container.                                                                                              |
+| `DJANGO_DEV_SERVER`      | Forces `manage.py runserver` + hot reload when set to `1`. Leave `0` for production (Gunicorn).                                                   |
+| `POSTGRES_*` + `DB_*`    | Database credentials shared by Django and Postgres.                                                                                               |
+| `REDIS_URL` / `CELERY_*` | Broker/result URLs for Celery + Channels.                                                                                                         |
+| `OPENAI_API_KEY`         | Used by the LangChain creator/reviewer agents.                                                                                                    |
+| `VITE_API_BASE_URL`      | API base URL baked into the frontend during `npm run build` (use `/api` when running behind Nginx, or `http://localhost:8000/api` for local dev). |
+| `VITE_WS_BASE_URL`       | WebSocket base URL (`ws://localhost:8080/ws` for Docker, `ws://localhost:8000/ws` locally).                                                       |
+
+The backend-specific sample (`backend/.env.example`) is still available if you prefer running Django outside Docker.
+
+## Quick Start (Docker Compose)
+
+1. **Bootstrap environment**
+
+   ```bash
+   cp .env.example .env
+   ```
+
+   Adjust credentials/keys, then (optionally) set `DJANGO_DEV_SERVER=1` if you want Django's auto-reload instead of Gunicorn.
+
+2. **Build and run the full stack**
+
+   ```bash
+   docker compose up --build
+   ```
+
+   The following endpoints become available:
+
+   - App UI: `http://localhost:8080`
+   - Direct Django API (if needed): `http://localhost:8000`
+   - Postgres: `localhost:5435`
+   - Redis: `localhost:6379`
+
+3. **Create your first superuser** (only once)
+
+   ```bash
+   docker compose exec backend python manage.py createsuperuser
+   ```
+
+4. **Watch logs / tail workers**
+   ```bash
+   docker compose logs -f backend
+   docker compose logs -f celery
+   ```
+
+### Hot Reload Profile
+
+- Keep `backend` + `celery` services mounted to `./backend` for instant reloads when `DJANGO_DEV_SERVER=1`.
+- For live React edits, launch the dev profile which runs `npm run dev` inside a lightweight Node container tied to your local source:
+  ```bash
+  docker compose --profile dev up frontend-dev
+  ```
+  Visit `http://localhost:5173`; API/websocket calls still proxy through the same backend.
+
+Tear everything down with `docker compose down -v` when you're done.
+
 ## Prerequisites
 
 Make sure the following are installed locally:
@@ -174,4 +272,67 @@ Navigate to `http://localhost:5173` to log in (use the superuser you created) an
 
 - Seed sample data via Django admin to explore the UI faster
 - Configure additional LLM providers by adding keys to the environment and enabling them in the admin (`LLMConfig` model)
-- Containerize the stack with Docker Compose for a production-like setup (Redis, Postgres, backend, frontend, Nginx)
+- Deploy the Docker Compose stack to a remote host (Fly.io, Render, ECS, etc.) and plug in production secrets
+
+## API Reference
+
+### Authentication
+
+| Method | Endpoint            | Purpose               |
+| ------ | ------------------- | --------------------- |
+| `POST` | `/api/auth/login/`  | Obtain auth token.    |
+| `POST` | `/api/auth/logout/` | Revoke current token. |
+| `GET`  | `/api/auth/user/`   | Current user info.    |
+
+### Courses & Publishing
+
+| Method   | Endpoint                       | Notes                                       |
+| -------- | ------------------------------ | ------------------------------------------- |
+| `POST`   | `/api/courses/`                | Create a course and kick off AI generation. |
+| `GET`    | `/api/courses/`                | List with search, pagination, filters.      |
+| `GET`    | `/api/courses/{id}/`           | Course detail (nested modules/quiz).        |
+| `PATCH`  | `/api/courses/{id}/`           | Update title/description/status fields.     |
+| `DELETE` | `/api/courses/{id}/`           | Remove course + related content.            |
+| `POST`   | `/api/courses/{id}/publish/`   | Draft → Published.                          |
+| `POST`   | `/api/courses/{id}/unpublish/` | Published → Draft.                          |
+
+### Regeneration
+
+| Method | Endpoint                                            | Body                              |
+| ------ | --------------------------------------------------- | --------------------------------- |
+| `POST` | `/api/courses/{id}/modules/{module_id}/regenerate/` | `{ "feedback": "optional text" }` |
+| `POST` | `/api/courses/{id}/quiz/regenerate/`                | `{ "feedback": "optional text" }` |
+
+### Quiz & Questions
+
+| Method   | Endpoint                            | Purpose                        |
+| -------- | ----------------------------------- | ------------------------------ |
+| `POST`   | `/api/courses/{id}/quiz/questions/` | Add question + answers.        |
+| `GET`    | `/api/courses/{id}/quiz/questions/` | List questions for a course.   |
+| `PATCH`  | `/api/questions/{id}/`              | Edit an existing question.     |
+| `DELETE` | `/api/questions/{id}/`              | Remove a question and answers. |
+
+### Generation Tasks
+
+| Method | Endpoint                           | Purpose                                        |
+| ------ | ---------------------------------- | ---------------------------------------------- |
+| `GET`  | `/api/generation-tasks/{task_id}/` | Poll the status/progress of a background task. |
+
+## WebSocket Messages
+
+- Connect via `ws://localhost:8080/ws/generation/{course_id}/?token=<auth_token>` when running in Docker (or `ws://localhost:8000/...` locally).
+- Message payload:
+
+```json
+{
+	"type": "generation_status",
+	"data": {
+		"status": "running",
+		"stage": "reviewing",
+		"progress": 66,
+		"message": "Reviewing content..."
+	}
+}
+```
+
+`stage` cycles through `creating`, `reviewing`, `refining`, and `completed`. When `status` becomes `completed` (or `failed`) the Celery task updates the database and the frontend refreshes automatically.
