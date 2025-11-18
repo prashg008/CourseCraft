@@ -3,12 +3,13 @@ from rest_framework.decorators import action
 from rest_framework.response import Response
 from rest_framework.permissions import IsAuthenticated
 from django.shortcuts import get_object_or_404
-from django.db.models import Count
+from django.db.models import Count, Q
 from .models import Course, Module, Lesson, Quiz, Question, Answer
 from .serializers import (
     CourseSerializer,
     CourseListSerializer,
     CourseCreateSerializer,
+    CourseUpdateSerializer,
     ModuleSerializer,
     ModuleCreateSerializer,
     LessonSerializer,
@@ -37,8 +38,8 @@ class CourseViewSet(viewsets.ModelViewSet):
         return CourseSerializer
 
     def get_queryset(self):
-        """Filter courses by owner"""
-        return (
+        """Filter courses by owner with optional search/status/order"""
+        queryset = (
             Course.objects.filter(owner=self.request.user)
             .select_related("quiz")
             .prefetch_related("modules__lessons", "quiz__questions__answers")
@@ -48,9 +49,37 @@ class CourseViewSet(viewsets.ModelViewSet):
             )
         )
 
+        params = self.request.query_params
+
+        status_filter = params.get("status")
+        if status_filter:
+            normalized_status = status_filter.lower()
+            if normalized_status != "all" and normalized_status in dict(Course.STATUS_CHOICES):
+                queryset = queryset.filter(status=normalized_status)
+
+        search_query = params.get("search")
+        if search_query:
+            queryset = queryset.filter(Q(title__icontains=search_query) | Q(description__icontains=search_query))
+
+        ordering = params.get("ordering")
+        allowed_ordering = {"title", "-title", "created_at", "-created_at"}
+        if ordering in allowed_ordering:
+            queryset = queryset.order_by(ordering)
+
+        return queryset
+
     def perform_create(self, serializer):
         """Set the owner to the current user"""
         serializer.save(owner=self.request.user)
+
+    @action(detail=True, methods=["patch"], url_path="details")
+    def update_details(self, request, pk=None):
+        """Update editable course fields like title and description"""
+        course = self.get_object()
+        serializer = CourseUpdateSerializer(course, data=request.data, partial=True)
+        serializer.is_valid(raise_exception=True)
+        serializer.save()
+        return Response(CourseSerializer(course).data, status=status.HTTP_200_OK)
 
     @action(detail=True, methods=["post"])
     def publish(self, request, pk=None):
@@ -96,18 +125,13 @@ class CourseViewSet(viewsets.ModelViewSet):
 
         # Check if there's already a running task for this module
         existing_task = GenerationTask.objects.filter(
-            entity_type='module',
-            entity_id=str(module_id),
-            status__in=['pending', 'running']
+            entity_type="module", entity_id=str(module_id), status__in=["pending", "running"]
         ).first()
 
         if existing_task:
             return Response(
-                {
-                    'error': 'A generation task is already running for this module',
-                    'task_id': str(existing_task.id)
-                },
-                status=status.HTTP_400_BAD_REQUEST
+                {"error": "A generation task is already running for this module", "task_id": str(existing_task.id)},
+                status=status.HTTP_400_BAD_REQUEST,
             )
 
         # Note: Lessons will be deleted by the Celery task AFTER successful generation
@@ -115,28 +139,27 @@ class CourseViewSet(viewsets.ModelViewSet):
 
         # Create generation task
         task = GenerationTask.objects.create(
-            entity_type='module',
+            entity_type="module",
             entity_id=str(module_id),
             course=course,
-            status='pending',
-            current_stage='creating',
+            status="pending",
+            current_stage="creating",
             progress=0,
-            message='Task created, waiting to start...'
+            message="Task created, waiting to start...",
         )
 
         # Update module status
-        module.generation_status = 'generating'
+        module.generation_status = "generating"
         module.save()
 
         # Start the Celery task
         generate_module_lessons.delay(str(task.id), str(module_id))
 
         serializer = GenerationTaskSerializer(task)
-        return Response({
-            'success': True,
-            'message': 'Module regeneration started',
-            'data': serializer.data
-        }, status=status.HTTP_201_CREATED)
+        return Response(
+            {"success": True, "message": "Module regeneration started", "data": serializer.data},
+            status=status.HTTP_201_CREATED,
+        )
 
     @action(detail=True, methods=["post"], url_path="quiz/regenerate")
     def regenerate_quiz(self, request, pk=None):
@@ -146,25 +169,17 @@ class CourseViewSet(viewsets.ModelViewSet):
         # Get or create quiz for this course
         quiz = Quiz.objects.filter(course=course).first()
         if not quiz:
-            return Response(
-                {'error': 'No quiz found for this course'},
-                status=status.HTTP_404_NOT_FOUND
-            )
+            return Response({"error": "No quiz found for this course"}, status=status.HTTP_404_NOT_FOUND)
 
         # Check if there's already a running task for this quiz
         existing_task = GenerationTask.objects.filter(
-            entity_type='quiz',
-            entity_id=str(quiz.id),
-            status__in=['pending', 'running']
+            entity_type="quiz", entity_id=str(quiz.id), status__in=["pending", "running"]
         ).first()
 
         if existing_task:
             return Response(
-                {
-                    'error': 'A generation task is already running for this quiz',
-                    'task_id': str(existing_task.id)
-                },
-                status=status.HTTP_400_BAD_REQUEST
+                {"error": "A generation task is already running for this quiz", "task_id": str(existing_task.id)},
+                status=status.HTTP_400_BAD_REQUEST,
             )
 
         # Note: Questions will be deleted by the Celery task AFTER successful generation
@@ -172,28 +187,27 @@ class CourseViewSet(viewsets.ModelViewSet):
 
         # Create generation task
         task = GenerationTask.objects.create(
-            entity_type='quiz',
+            entity_type="quiz",
             entity_id=str(quiz.id),
             course=course,
-            status='pending',
-            current_stage='creating',
+            status="pending",
+            current_stage="creating",
             progress=0,
-            message='Task created, waiting to start...'
+            message="Task created, waiting to start...",
         )
 
         # Update quiz status
-        quiz.generation_status = 'generating'
+        quiz.generation_status = "generating"
         quiz.save()
 
         # Start the Celery task
         generate_quiz_questions_task.delay(str(task.id), str(quiz.id))
 
         serializer = GenerationTaskSerializer(task)
-        return Response({
-            'success': True,
-            'message': 'Quiz regeneration started',
-            'data': serializer.data
-        }, status=status.HTTP_201_CREATED)
+        return Response(
+            {"success": True, "message": "Quiz regeneration started", "data": serializer.data},
+            status=status.HTTP_201_CREATED,
+        )
 
 
 class ModuleViewSet(viewsets.ModelViewSet):
@@ -206,13 +220,12 @@ class ModuleViewSet(viewsets.ModelViewSet):
     def get_serializer_class(self):
         if self.action in ["create", "update", "partial_update"]:
             return ModuleCreateSerializer
-        return ModuleSerializer
+        return CourseSerializer
 
     def get_queryset(self):
         """Filter modules by course owner"""
+        queryset = Course.objects.filter(owner=self.request.user).prefetch_related("modules__lessons")
         course_id = self.request.query_params.get("course_id")
-        queryset = Module.objects.filter(course__owner=self.request.user).prefetch_related("lessons")
-
         if course_id:
             queryset = queryset.filter(course_id=course_id)
 

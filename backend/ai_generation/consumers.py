@@ -1,6 +1,7 @@
 import json
-from channels.generic.websocket import AsyncWebsocketConsumer
-from channels.db import database_sync_to_async
+from uuid import UUID
+from channels.generic.websocket import AsyncWebsocketConsumer  # type: ignore[import-not-found]
+from channels.db import database_sync_to_async  # type: ignore[import-not-found]
 from django.core.exceptions import ValidationError
 from .models import GenerationTask
 
@@ -13,7 +14,11 @@ class GenerationConsumer(AsyncWebsocketConsumer):
 
     async def connect(self):
         route_kwargs = self.scope.get("url_route", {}).get("kwargs", {})
-        self.course_id = route_kwargs.get("course_id")
+        self.course_id = self._normalize_uuid(route_kwargs.get("course_id"))
+        task_id = self._normalize_uuid(route_kwargs.get("task_id"))
+
+        if not self.course_id and task_id:
+            self.course_id = await self._get_course_id_for_task(task_id)
 
         if not self.course_id:
             await self.close(code=4400)
@@ -57,14 +62,14 @@ class GenerationConsumer(AsyncWebsocketConsumer):
     def get_all_active_tasks(self):
         """Get all active or recent tasks for this course with entity information"""
         try:
-            tasks = GenerationTask.objects.filter(
-                course_id=self.course_id
-            ).order_by("-created_at")[:10]  # Get last 10 tasks
+            tasks = GenerationTask.objects.filter(course_id=self.course_id).order_by("-created_at")[
+                :10
+            ]  # Get last 10 tasks
 
             return [
                 {
                     "id": str(task.id),
-                    "course_id": str(task.course_id),
+                    "course_id": str(task.course_id),  # type: ignore[attr-defined]
                     "entity_type": task.entity_type,
                     "entity_id": task.entity_id,
                     "status": task.status,
@@ -79,3 +84,20 @@ class GenerationConsumer(AsyncWebsocketConsumer):
             ]
         except (ValueError, ValidationError):
             return []
+
+    @staticmethod
+    def _normalize_uuid(value):
+        if value is None:
+            return None
+        if isinstance(value, UUID):
+            return str(value)
+        value_str = str(value).strip()
+        return value_str.lower() if value_str else None
+
+    @database_sync_to_async
+    def _get_course_id_for_task(self, task_id):
+        try:
+            task = GenerationTask.objects.only("course_id").get(id=task_id)
+            return str(task.course_id)  # type: ignore[attr-defined]
+        except (GenerationTask.DoesNotExist, ValueError, ValidationError):
+            return None
