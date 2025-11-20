@@ -63,8 +63,8 @@ apiClient.interceptors.response.use(
 const handleApiError = (error: unknown): Error => {
   if (axios.isAxiosError(error)) {
     const message =
-      error.response?.data?.error ||
       error.response?.data?.message ||
+      error.response?.data?.error ||
       error.message ||
       'An error occurred';
     return new Error(message);

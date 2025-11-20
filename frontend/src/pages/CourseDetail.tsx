@@ -477,22 +477,18 @@ function CourseDetail() {
             Back to Courses
           </Link>
 
-          <div className="flex items-start justify-between gap-4">
-            <div className="flex-1 min-w-0">
-              <div className="flex items-center flex-wrap gap-3 mb-2">
-                <h1 className="text-3xl font-bold text-gray-900 truncate">{course.title}</h1>
-                <div className="flex items-center gap-2">
-                  <Badge variant={getStatusVariant(course.status)}>
-                    {course.status.charAt(0).toUpperCase() + course.status.slice(1)}
-                  </Badge>
-                  {course.status === 'generating' && <LoadingSpinner size="sm" />}
-                </div>
-              </div>
-              <p className="text-gray-600 line-clamp-2">{course.description}</p>
+          <div>
+            <div className="flex items-center gap-3 mb-2">
+              <h1 className="text-3xl font-bold text-gray-900">{course.title}</h1>
+              <Badge variant={getStatusVariant(course.status)}>
+                {course.status.charAt(0).toUpperCase() + course.status.slice(1)}
+              </Badge>
+              {course.status === 'generating' && <LoadingSpinner size="sm" />}
             </div>
+            <p className="text-gray-600 mb-4">{course.description}</p>
 
             {/* Action Buttons */}
-            <div className="flex items-center gap-2 flex-shrink-0">
+            <div className="flex items-center gap-2 flex-wrap">
               <Button variant="ghost" size="md" onClick={openEditModal} disabled={statusChanging}>
                 <svg className="w-4 h-4 mr-2" fill="none" viewBox="0 0 24 24" stroke="currentColor">
                   <path

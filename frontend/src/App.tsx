@@ -2,8 +2,9 @@ import { BrowserRouter, Routes, Route, Navigate } from 'react-router-dom';
 import { Toaster } from 'react-hot-toast';
 import { AuthProvider } from '@/context/AuthContext';
 import { SocketProvider } from '@/websocket';
-import { ProtectedRoute } from '@/components/auth';
+import { ProtectedRoute, GuestRoute } from '@/components/auth';
 import Login from '@/pages/Login';
+import Signup from '@/pages/Signup';
 import CourseList from '@/pages/CourseList';
 import CreateCourse from '@/pages/CreateCourse';
 import CourseDetail from '@/pages/CourseDetail';
@@ -16,7 +17,22 @@ function App() {
         <SocketProvider url={WS_BASE_URL} namespace="/ws" autoConnect={true}>
           <Toaster />
           <Routes>
-            <Route path="/login" element={<Login />} />
+            <Route
+              path="/login"
+              element={
+                <GuestRoute>
+                  <Login />
+                </GuestRoute>
+              }
+            />
+            <Route
+              path="/signup"
+              element={
+                <GuestRoute>
+                  <Signup />
+                </GuestRoute>
+              }
+            />
             <Route
               path="/"
               element={

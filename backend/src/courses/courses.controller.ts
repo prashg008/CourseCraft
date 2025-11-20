@@ -69,6 +69,19 @@ export class CoursesController {
     return this.coursesService.update(id, user.id, updateCourseDto);
   }
 
+  @Patch(':id/details')
+  @ApiOperation({ summary: 'Update course details (title and/or description)' })
+  @ApiResponse({ status: 200, description: 'Course details updated' })
+  @ApiResponse({ status: 404, description: 'Course not found' })
+  @ApiResponse({ status: 401, description: 'Unauthorized' })
+  async updateDetails(
+    @CurrentUser() user: UserPayload,
+    @Param('id') id: string,
+    @Body() updateCourseDto: UpdateCourseDto,
+  ) {
+    return this.coursesService.update(id, user.id, updateCourseDto);
+  }
+
   @Delete(':id')
   @HttpCode(HttpStatus.NO_CONTENT)
   @ApiOperation({ summary: 'Delete a course' })
