@@ -1,5 +1,5 @@
 .claude
-spec.md
-todo.md
+docs/
 .env
 .serena
+.vscode

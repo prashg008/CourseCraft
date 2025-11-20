@@ -15,17 +15,21 @@ import type { Quiz, Question, QuestionFormData } from '@/types';
 
 interface QuizSectionProps {
   quiz?: Quiz | null;
-  onRegenerate: () => void;
   onUpdate: () => void; // Callback to refresh course data
+  onRegenerate?: () => Promise<void> | void;
   isRegenerating?: boolean;
 }
 
 export function QuizSection({
   quiz,
-  onRegenerate,
   onUpdate,
-  isRegenerating = false,
+  onRegenerate: _onRegenerate,
+  isRegenerating: _isRegenerating,
 }: QuizSectionProps) {
+  // keep these referenced to avoid lint errors; props are accepted for compatibility
+  void _onRegenerate;
+  void _isRegenerating;
+
   const [isModalOpen, setIsModalOpen] = useState(false);
   const [editingQuestion, setEditingQuestion] = useState<Question | undefined>();
   const [loading, setLoading] = useState(false);
@@ -181,28 +185,6 @@ export function QuizSection({
                   </svg>
                   Add Question
                 </Button>
-                <Button
-                  variant="secondary"
-                  size="sm"
-                  onClick={onRegenerate}
-                  loading={isRegenerating}
-                  disabled={isRegenerating}
-                >
-                  <svg
-                    className="w-4 h-4 mr-1"
-                    fill="none"
-                    viewBox="0 0 24 24"
-                    stroke="currentColor"
-                  >
-                    <path
-                      strokeLinecap="round"
-                      strokeLinejoin="round"
-                      strokeWidth={2}
-                      d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15"
-                    />
-                  </svg>
-                  Regenerate Quiz
-                </Button>
               </div>
             </div>
           </div>
@@ -225,9 +207,7 @@ export function QuizSection({
                   />
                 </svg>
                 <p className="text-sm font-medium">No questions in this quiz yet</p>
-                <p className="text-sm mt-1">
-                  Get started by adding a question or regenerating the quiz
-                </p>
+                <p className="text-sm mt-1">Get started by adding a question</p>
               </div>
             ) : (
               quiz.questions.map((question, index) => {

@@ -18,8 +18,8 @@ import type {
 } from '../types';
 import { camelizeKeys } from '@/utils/casing';
 
-export const API_BASE_URL = import.meta.env.VITE_API_BASE_URL ?? 'http://localhost:8000/api';
-export const WS_BASE_URL = import.meta.env.VITE_WS_BASE_URL ?? 'ws://localhost:8000/ws';
+export const API_BASE_URL = import.meta.env.VITE_API_BASE_URL ?? 'http://localhost:3000/api';
+export const WS_BASE_URL = import.meta.env.VITE_WS_BASE_URL ?? 'http://localhost:3000';
 
 // Create axios instance
 const apiClient: AxiosInstance = axios.create({
@@ -35,7 +35,7 @@ apiClient.interceptors.request.use(
     const token = localStorage.getItem('authToken');
     const headers = (config.headers ?? {}) as AxiosRequestHeaders;
     if (token) {
-      headers.Authorization = `Token ${token}`;
+      headers.Authorization = `Bearer ${token}`;
     }
     config.headers = headers;
     return config;
@@ -83,13 +83,13 @@ export const authApi = {
     username: string,
     email: string,
     password: string
-  ): Promise<ApiResponse<{ token: string; user: User }>> {
+  ): Promise<ApiResponse<{ accessToken: string; user: User }>> {
     try {
-      const response = await apiClient.post('/auth/register/', { username, email, password });
+      const response = await apiClient.post('/auth/register', { username, email, password });
       return {
-        success: response.data.success,
-        data: response.data.data,
-        message: response.data.message,
+        success: response.statusText === 'OK',
+        data: response.data,
+        message: response.statusText,
       };
     } catch (error) {
       throw handleApiError(error);
@@ -99,13 +99,13 @@ export const authApi = {
   async login(
     email: string,
     password: string
-  ): Promise<ApiResponse<{ token: string; user: User }>> {
+  ): Promise<ApiResponse<{ accessToken: string; user: User }>> {
     try {
-      const response = await apiClient.post('/auth/login/', { email, password });
+      const response = await apiClient.post('/auth/login', { email, password });
       return {
-        success: response.data.success,
-        data: response.data.data,
-        message: response.data.message,
+        success: response.statusText === 'OK',
+        data: response.data,
+        message: response.statusText,
       };
     } catch (error) {
       throw handleApiError(error);
@@ -114,11 +114,11 @@ export const authApi = {
 
   async logout(): Promise<ApiResponse<null>> {
     try {
-      const response = await apiClient.post('/auth/logout/');
+      const response = await apiClient.post('/auth/logout');
       return {
-        success: response.data.success,
-        data: null,
-        message: response.data.message,
+        success: response.statusText === 'OK',
+        data: response.data,
+        message: response.statusText,
       };
     } catch (error) {
       throw handleApiError(error);
@@ -127,10 +127,11 @@ export const authApi = {
 
   async me(): Promise<ApiResponse<User>> {
     try {
-      const response = await apiClient.get('/auth/me/');
+      const response = await apiClient.get('/auth/profile');
+      // Backend returns user object directly, not wrapped in {success, data}
       return {
-        success: response.data.success,
-        data: response.data.data,
+        success: true,
+        data: response.data,
       };
     } catch (error) {
       throw handleApiError(error);
@@ -144,12 +145,14 @@ export const coursesApi = {
     try {
       const page = filters?.page ?? 1;
       const pageSize = filters?.pageSize ?? 10;
-      const sortOrder = filters?.sortOrder ?? 'desc';
-      const sortBy = filters?.sortBy ?? 'date';
+      const sortBy = filters?.sortBy === 'title' ? 'title' : 'createdAt';
+      const sortOrder = (filters?.sortOrder ?? 'desc').toUpperCase() === 'ASC' ? 'ASC' : 'DESC';
 
       const params: Record<string, unknown> = {
         page,
-        page_size: pageSize,
+        limit: pageSize,
+        sortBy,
+        order: sortOrder,
       };
 
       if (filters?.search) {
@@ -160,19 +163,18 @@ export const coursesApi = {
         params.status = filters.status;
       }
 
-      if (sortBy === 'title') {
-        params.ordering = sortOrder === 'asc' ? 'title' : '-title';
-      } else {
-        params.ordering = sortOrder === 'asc' ? 'created_at' : '-created_at';
-      }
+      const response = await apiClient.get('/courses', { params });
+      const { data = [], meta } = response.data ?? {};
+      const totalItems = meta?.total ?? data.length;
+      const resolvedPageSize = meta?.limit ?? pageSize;
+      const totalPages = meta?.totalPages ?? Math.ceil(totalItems / (resolvedPageSize || 1));
 
-      const response = await apiClient.get('/courses/', { params });
       return {
-        data: response.data.results || [],
-        total: response.data.count || 0,
-        page,
-        pageSize,
-        totalPages: Math.ceil((response.data.count || 0) / pageSize),
+        data,
+        total: totalItems,
+        page: meta?.page ?? page,
+        pageSize: resolvedPageSize,
+        totalPages,
       };
     } catch (error) {
       throw handleApiError(error);
@@ -181,7 +183,7 @@ export const coursesApi = {
 
   async getById(id: string): Promise<ApiResponse<Course>> {
     try {
-      const response = await apiClient.get(`/courses/${id}/`);
+      const response = await apiClient.get(`/courses/${id}`);
       return {
         success: true,
         data: response.data,
@@ -193,7 +195,7 @@ export const coursesApi = {
 
   async create(data: CourseFormData): Promise<ApiResponse<Course>> {
     try {
-      const response = await apiClient.post('/courses/', data);
+      const response = await apiClient.post('/courses', data);
       return {
         success: true,
         data: response.data,
@@ -206,7 +208,7 @@ export const coursesApi = {
 
   async update(id: string, data: Partial<Course>): Promise<ApiResponse<Course>> {
     try {
-      const response = await apiClient.patch(`/courses/${id}/`, data);
+      const response = await apiClient.patch(`/courses/${id}`, data);
       return {
         success: true,
         data: response.data,
@@ -219,7 +221,7 @@ export const coursesApi = {
 
   async updateDetails(id: string, data: CourseUpdatePayload): Promise<ApiResponse<Course>> {
     try {
-      const response = await apiClient.patch(`/courses/${id}/details/`, data);
+      const response = await apiClient.patch(`/courses/${id}/details`, data);
       return {
         success: true,
         data: response.data,
@@ -232,7 +234,7 @@ export const coursesApi = {
 
   async delete(id: string): Promise<ApiResponse<null>> {
     try {
-      await apiClient.delete(`/courses/${id}/`);
+      await apiClient.delete(`/courses/${id}`);
       return {
         success: true,
         data: null,
@@ -245,7 +247,7 @@ export const coursesApi = {
 
   async publish(id: string): Promise<ApiResponse<Course>> {
     try {
-      const response = await apiClient.post(`/courses/${id}/publish/`);
+      const response = await apiClient.post(`/courses/${id}/publish`);
       return {
         success: true,
         data: response.data,
@@ -258,7 +260,7 @@ export const coursesApi = {
 
   async unpublish(id: string): Promise<ApiResponse<Course>> {
     try {
-      const response = await apiClient.post(`/courses/${id}/unpublish/`);
+      const response = await apiClient.post(`/courses/${id}/unpublish`);
       return {
         success: true,
         data: response.data,
@@ -271,7 +273,7 @@ export const coursesApi = {
 
   async archive(id: string): Promise<ApiResponse<Course>> {
     try {
-      const response = await apiClient.post(`/courses/${id}/archive/`);
+      const response = await apiClient.post(`/courses/${id}/archive`);
       return {
         success: true,
         data: response.data,
@@ -284,7 +286,7 @@ export const coursesApi = {
 
   async unarchive(id: string): Promise<ApiResponse<Course>> {
     try {
-      const response = await apiClient.post(`/courses/${id}/unarchive/`);
+      const response = await apiClient.post(`/courses/${id}/unarchive`);
       return {
         success: true,
         data: response.data,
@@ -297,7 +299,7 @@ export const coursesApi = {
 
   async getArchivedCourses(): Promise<ApiResponse<Course[]>> {
     try {
-      const response = await apiClient.get('/courses/archived/');
+      const response = await apiClient.get('/courses/archived');
       return {
         success: true,
         data: response.data,
@@ -315,7 +317,7 @@ export const coursesApi = {
     try {
       const payload = request ? { feedback: request.feedback } : {};
       const response = await apiClient.post(
-        `/courses/${courseId}/modules/${moduleId}/regenerate/`,
+        `/courses/${courseId}/modules/${moduleId}/regenerate`,
         payload
       );
       return {
@@ -334,7 +336,7 @@ export const coursesApi = {
   ): Promise<ApiResponse<GenerationTask>> {
     try {
       const payload = request ? { feedback: request.feedback } : {};
-      const response = await apiClient.post(`/courses/${courseId}/quiz/regenerate/`, payload);
+      const response = await apiClient.post(`/courses/${courseId}/quiz/regenerate`, payload);
       return {
         success: true,
         data: response.data,
@@ -355,7 +357,7 @@ export const modulesApi = {
     order: number;
   }): Promise<ApiResponse<Module>> {
     try {
-      const response = await apiClient.post('/modules/', data);
+      const response = await apiClient.post('/modules', data);
       return {
         success: true,
         data: response.data,
@@ -368,7 +370,7 @@ export const modulesApi = {
 
   async update(id: string, data: Partial<Module>): Promise<ApiResponse<Module>> {
     try {
-      const response = await apiClient.patch(`/modules/${id}/`, data);
+      const response = await apiClient.patch(`/modules/${id}`, data);
       return {
         success: true,
         data: response.data,
@@ -381,7 +383,7 @@ export const modulesApi = {
 
   async delete(id: string): Promise<ApiResponse<null>> {
     try {
-      await apiClient.delete(`/modules/${id}/`);
+      await apiClient.delete(`/modules/${id}`);
       return {
         success: true,
         data: null,
@@ -402,7 +404,7 @@ export const lessonsApi = {
     order: number;
   }): Promise<ApiResponse<Lesson>> {
     try {
-      const response = await apiClient.post('/lessons/', data);
+      const response = await apiClient.post('/lessons', data);
       return {
         success: true,
         data: response.data,
@@ -415,7 +417,7 @@ export const lessonsApi = {
 
   async update(id: string, data: Partial<Lesson>): Promise<ApiResponse<Lesson>> {
     try {
-      const response = await apiClient.patch(`/lessons/${id}/`, data);
+      const response = await apiClient.patch(`/lessons/${id}`, data);
       return {
         success: true,
         data: response.data,
@@ -428,7 +430,7 @@ export const lessonsApi = {
 
   async delete(id: string): Promise<ApiResponse<null>> {
     try {
-      await apiClient.delete(`/lessons/${id}/`);
+      await apiClient.delete(`/lessons/${id}`);
       return {
         success: true,
         data: null,
@@ -444,7 +446,7 @@ export const lessonsApi = {
 export const quizApi = {
   async create(data: { course: string }): Promise<ApiResponse<Quiz>> {
     try {
-      const response = await apiClient.post('/quizzes/', data);
+      const response = await apiClient.post('/quizzes', data);
       return {
         success: true,
         data: response.data,
@@ -457,7 +459,7 @@ export const quizApi = {
 
   async delete(id: string): Promise<ApiResponse<null>> {
     try {
-      await apiClient.delete(`/quizzes/${id}/`);
+      await apiClient.delete(`/quizzes/${id}`);
       return {
         success: true,
         data: null,
@@ -475,14 +477,14 @@ export const questionsApi = {
     data: { quiz: string; order: number } & QuestionFormData
   ): Promise<ApiResponse<Question>> {
     try {
-      const response = await apiClient.post('/questions/', {
-        quiz: data.quiz,
+      const response = await apiClient.post('/questions', {
+        quizId: data.quiz,
         text: data.text,
         type: data.type,
         order: data.order,
         answers: data.answers.map((answer, index) => ({
           text: answer.text,
-          is_correct: answer.isCorrect,
+          isCorrect: answer.isCorrect,
           order: index + 1,
         })),
       });
@@ -504,12 +506,12 @@ export const questionsApi = {
       if (data.answers) {
         payload.answers = data.answers.map((answer, index) => ({
           text: answer.text,
-          is_correct: answer.isCorrect,
+          isCorrect: answer.isCorrect,
           order: index + 1,
         }));
       }
 
-      const response = await apiClient.patch(`/questions/${id}/`, payload);
+      const response = await apiClient.patch(`/questions/${id}`, payload);
       return {
         success: true,
         data: response.data,
@@ -522,7 +524,7 @@ export const questionsApi = {
 
   async delete(id: string): Promise<ApiResponse<null>> {
     try {
-      await apiClient.delete(`/questions/${id}/`);
+      await apiClient.delete(`/questions/${id}`);
       return {
         success: true,
         data: null,
@@ -538,11 +540,11 @@ export const questionsApi = {
 export const aiApi = {
   async generateCourse(courseId: string): Promise<ApiResponse<{ task_id: string }>> {
     try {
-      const response = await apiClient.post(`/ai/generate/course/${courseId}/`);
+      const response = await apiClient.post(`/courses/${courseId}/regenerate`);
       return {
-        success: response.data.success,
-        data: { task_id: response.data.data.id },
-        message: response.data.message,
+        success: true,
+        data: { task_id: courseId }, // Return courseId as task_id for compatibility
+        message: response.data.message || 'Course regeneration started',
       };
     } catch (error) {
       throw handleApiError(error);
@@ -551,7 +553,7 @@ export const aiApi = {
 
   async generateModule(moduleId: string): Promise<ApiResponse<{ task_id: string }>> {
     try {
-      const response = await apiClient.post(`/ai/generate/module/${moduleId}/`);
+      const response = await apiClient.post(`/ai/generate/module/${moduleId}`);
       return {
         success: response.data.success,
         data: { task_id: response.data.data.id },
@@ -564,7 +566,7 @@ export const aiApi = {
 
   async getTaskStatus(taskId: string): Promise<ApiResponse<Record<string, unknown>>> {
     try {
-      const response = await apiClient.get(`/ai/tasks/${taskId}/status/`);
+      const response = await apiClient.get(`/ai/tasks/${taskId}/status`);
       return {
         success: response.data.success,
         data: response.data.data,
@@ -576,7 +578,7 @@ export const aiApi = {
 
   async getTasks(page: number = 1): Promise<PaginatedResponse<Record<string, unknown>>> {
     try {
-      const response = await apiClient.get('/ai/tasks/', { params: { page } });
+      const response = await apiClient.get('/ai/tasks', { params: { page } });
       return {
         data: response.data.results,
         total: response.data.count,
@@ -588,36 +590,6 @@ export const aiApi = {
       throw handleApiError(error);
     }
   },
-};
-
-// WebSocket connection for real-time updates
-export const createGenerationWebSocket = (
-  courseId: string,
-  onMessage: (data: Record<string, unknown>) => void,
-  token?: string
-) => {
-  const baseUrl = WS_BASE_URL.replace(/\/$/, '');
-  const query = token ? `?token=${token}` : '';
-  const ws = new WebSocket(`${baseUrl}/generation/${courseId}/${query}`);
-
-  ws.onopen = () => {
-    console.log('Generation WebSocket connected', courseId);
-  };
-
-  ws.onmessage = event => {
-    const payload = JSON.parse(event.data);
-    onMessage(payload);
-  };
-
-  ws.onerror = error => {
-    console.error('WebSocket error', error);
-  };
-
-  ws.onclose = () => {
-    console.log('Generation WebSocket closed');
-  };
-
-  return ws;
 };
 
 export default apiClient;

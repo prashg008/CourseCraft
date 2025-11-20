@@ -16,28 +16,16 @@ import { GenerationStatus, ModuleCard, QuizSection } from '@/components/course';
 import { coursesApi, aiApi } from '@/services/api';
 import { formatDateWithTime } from '@/utils/date';
 import { showError, showSuccess } from '@/utils/toast';
-import { useWebSocket } from '@/hooks/useWebSocket';
-import { useAuth } from '@/context/AuthContext';
+import { useCourseGeneration } from '@/websocket';
 import type { Course, CourseStatus } from '@/types';
 
 type TabType = 'overview' | 'modules' | 'quiz';
 
-interface GenerationUpdate {
-  task_id: string;
-  entity_type: 'course' | 'module' | 'quiz';
-  entity_id: string;
-  status: string;
-  message?: string;
-  progress?: number;
-}
-
 function CourseDetail() {
   const { id } = useParams<{ id: string }>();
-  const { token } = useAuth();
   const [course, setCourse] = useState<Course | null>(null);
   const [loading, setLoading] = useState(true);
   const [activeTab, setActiveTab] = useState<TabType>('overview');
-  const [regeneratingModuleId, setRegeneratingModuleId] = useState<string | null>(null);
   const [regeneratingQuiz, setRegeneratingQuiz] = useState(false);
   const [statusChanging, setStatusChanging] = useState(false);
   const [pendingConfirm, setPendingConfirm] = useState<'archive' | 'regenerate-course' | null>(
@@ -48,6 +36,8 @@ function CourseDetail() {
   const [savingDetails, setSavingDetails] = useState(false);
   const [editForm, setEditForm] = useState({ title: '', description: '' });
   const [editErrors, setEditErrors] = useState<{ title?: string; description?: string }>({});
+  const courseId = course?.id;
+  const courseStatus = course?.status;
 
   // Fetch course data
   const fetchCourse = useCallback(async () => {
@@ -68,35 +58,35 @@ function CourseDetail() {
   }, [fetchCourse]);
 
   // WebSocket connection for real-time generation updates
-  useWebSocket<GenerationUpdate>({
-    courseId: id,
-    token,
-    enabled: Boolean(id && token),
-    retryLimit: -1,
-    onMessage: update => {
-      // When we get an update for module or quiz completion/failure, refresh course data
-      if (update.status === 'completed' || update.status === 'failed') {
-        fetchCourse();
-      }
-    },
-  });
+  const { data: generationUpdate } = useCourseGeneration(id || '');
 
-  // Handle module regeneration
-  const handleRegenerateModule = async (moduleId: string) => {
-    if (!id) return;
-
-    setRegeneratingModuleId(moduleId);
-    try {
-      await coursesApi.regenerateModule(id, moduleId);
-      showSuccess('Module regeneration started');
-      // Fetch immediately to show "generating" status, WebSocket will handle updates
-      await fetchCourse();
-      setRegeneratingModuleId(null);
-    } catch (error) {
-      showError(error instanceof Error ? error.message : 'Failed to regenerate module');
-      setRegeneratingModuleId(null);
+  // Refresh course data when generation completes or fails
+  useEffect(() => {
+    if (
+      generationUpdate &&
+      (generationUpdate.status === 'completed' || generationUpdate.status === 'failed')
+    ) {
+      fetchCourse();
     }
-  };
+  }, [generationUpdate, fetchCourse]);
+
+  // Reflect websocket progress locally so UI shows real-time generating state
+  useEffect(() => {
+    if (!generationUpdate || !courseId) {
+      return;
+    }
+
+    if (generationUpdate.courseId !== courseId) {
+      return;
+    }
+
+    const isInProgress =
+      generationUpdate.status === 'generating' || generationUpdate.status === 'pending';
+
+    if (isInProgress && courseStatus !== 'generating') {
+      setCourse(prevCourse => (prevCourse ? { ...prevCourse, status: 'generating' } : prevCourse));
+    }
+  }, [generationUpdate, courseId, courseStatus]);
 
   // Handle quiz regeneration
   const handleRegenerateQuiz = async () => {
@@ -416,56 +406,7 @@ function CourseDetail() {
               </CardBody>
             </Card>
 
-            {/* Quick Actions */}
-            <Card>
-              <CardBody>
-                <h3 className="text-lg font-semibold text-gray-900 mb-4">Quick Actions</h3>
-                <div className="flex flex-wrap gap-3">
-                  <Button
-                    variant="secondary"
-                    size="md"
-                    onClick={() => setActiveTab('modules')}
-                    disabled={course.modules.length === 0}
-                  >
-                    <svg
-                      className="w-4 h-4 mr-2"
-                      fill="none"
-                      viewBox="0 0 24 24"
-                      stroke="currentColor"
-                    >
-                      <path
-                        strokeLinecap="round"
-                        strokeLinejoin="round"
-                        strokeWidth={2}
-                        d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z"
-                      />
-                    </svg>
-                    View Modules ({course.modules.length})
-                  </Button>
-                  <Button
-                    variant="secondary"
-                    size="md"
-                    onClick={() => setActiveTab('quiz')}
-                    disabled={!course.quiz}
-                  >
-                    <svg
-                      className="w-4 h-4 mr-2"
-                      fill="none"
-                      viewBox="0 0 24 24"
-                      stroke="currentColor"
-                    >
-                      <path
-                        strokeLinecap="round"
-                        strokeLinejoin="round"
-                        strokeWidth={2}
-                        d="M9 5H7a2 2 0 00-2 2v12a2 2 0 002 2h10a2 2 0 002-2V7a2 2 0 00-2-2h-2M9 5a2 2 0 002 2h2a2 2 0 002-2M9 5a2 2 0 012-2h2a2 2 0 012 2"
-                      />
-                    </svg>
-                    View Quiz ({totalQuestions} questions)
-                  </Button>
-                </div>
-              </CardBody>
-            </Card>
+            {/* Quick Actions removed for course detail view */}
           </div>
         );
 
@@ -498,13 +439,7 @@ function CourseDetail() {
               </Card>
             ) : (
               course.modules.map((module, index) => (
-                <ModuleCard
-                  key={module.id}
-                  module={module}
-                  moduleNumber={index + 1}
-                  onRegenerate={handleRegenerateModule}
-                  isRegenerating={regeneratingModuleId === module.id}
-                />
+                <ModuleCard key={module.id} module={module} moduleNumber={index + 1} />
               ))
             )}
           </div>
@@ -559,12 +494,7 @@ function CourseDetail() {
             {/* Action Buttons */}
             <div className="flex items-center gap-2 flex-shrink-0">
               <Button variant="ghost" size="md" onClick={openEditModal} disabled={statusChanging}>
-                <svg
-                  className="w-4 h-4 mr-2"
-                  fill="none"
-                  viewBox="0 0 24 24"
-                  stroke="currentColor"
-                >
+                <svg className="w-4 h-4 mr-2" fill="none" viewBox="0 0 24 24" stroke="currentColor">
                   <path
                     strokeLinecap="round"
                     strokeLinejoin="round"
@@ -685,12 +615,7 @@ function CourseDetail() {
               `}
             >
               <div className="flex items-center gap-2">
-                <svg
-                  className="w-5 h-5"
-                  fill="none"
-                  viewBox="0 0 24 24"
-                  stroke="currentColor"
-                >
+                <svg className="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
                   <path
                     strokeLinecap="round"
                     strokeLinejoin="round"
@@ -713,12 +638,7 @@ function CourseDetail() {
               `}
             >
               <div className="flex items-center gap-2">
-                <svg
-                  className="w-5 h-5"
-                  fill="none"
-                  viewBox="0 0 24 24"
-                  stroke="currentColor"
-                >
+                <svg className="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
                   <path
                     strokeLinecap="round"
                     strokeLinejoin="round"
@@ -746,12 +666,7 @@ function CourseDetail() {
               `}
             >
               <div className="flex items-center gap-2">
-                <svg
-                  className="w-5 h-5"
-                  fill="none"
-                  viewBox="0 0 24 24"
-                  stroke="currentColor"
-                >
+                <svg className="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
                   <path
                     strokeLinecap="round"
                     strokeLinejoin="round"
@@ -800,11 +715,7 @@ function CourseDetail() {
           </>
         }
       >
-        <form
-          id="course-details-form"
-          className="space-y-4"
-          onSubmit={handleCourseDetailsSubmit}
-        >
+        <form id="course-details-form" className="space-y-4" onSubmit={handleCourseDetailsSubmit}>
           <Input
             label="Title"
             placeholder="Course title"
