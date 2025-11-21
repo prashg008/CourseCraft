@@ -1,4 +1,5 @@
 import { Injectable, CanActivate, ExecutionContext, ForbiddenException } from '@nestjs/common';
+import type { Request } from 'express';
 import { InjectRepository } from '@nestjs/typeorm';
 import { Repository } from 'typeorm';
 import { Course } from '../../courses/entities/course.entity';
@@ -13,7 +14,7 @@ export class OwnerGuard implements CanActivate {
   async canActivate(context: ExecutionContext): Promise<boolean> {
     const request = context.switchToHttp().getRequest();
     const user = request.user;
-    const courseId = request.params.id || request.params.courseId;
+    const courseId = request.params?.id || request.params?.courseId;
 
     if (!user) {
       throw new ForbiddenException('User not authenticated');

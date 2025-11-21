@@ -116,9 +116,15 @@ export class CoursesService {
 
     // Merge aggregate counts from raw results into returned course objects
     const data = courses.map((course, idx) => {
-      const row = raw[idx] || {};
-      const module_count = Number(row.module_count) || 0;
-      const quiz_question_count = Number(row.quiz_question_count) || 0;
+      const row = (raw[idx] ?? {}) as Record<string, unknown>;
+      const moduleRaw = row['module_count'];
+      const quizRaw = row['quiz_question_count'];
+
+      const module_count =
+        typeof moduleRaw === 'number' || typeof moduleRaw === 'string' ? Number(moduleRaw) : 0;
+
+      const quiz_question_count =
+        typeof quizRaw === 'number' || typeof quizRaw === 'string' ? Number(quizRaw) : 0;
 
       return Object.assign({}, course, {
         moduleCount: module_count,
@@ -445,5 +451,33 @@ export class CoursesService {
 
     course.status = CourseStatus.DRAFT;
     return this.courseRepository.save(course);
+  }
+
+  // Authorization helpers used by websocket gateway
+  async canAccessCourse(courseId: string, userId: string): Promise<boolean> {
+    try {
+      await this.findOne(courseId, userId);
+      return true;
+    } catch {
+      return false;
+    }
+  }
+
+  async canAccessModule(moduleId: string, userId: string): Promise<boolean> {
+    const module = await this.moduleRepository.findOne({
+      where: { id: moduleId },
+      relations: ['course'],
+    });
+    if (!module || !module.course) return false;
+    return module.course.ownerId === userId;
+  }
+
+  async canAccessQuiz(quizId: string, userId: string): Promise<boolean> {
+    const quiz = await this.quizRepository.findOne({
+      where: { id: quizId },
+      relations: ['course'],
+    });
+    if (!quiz || !quiz.course) return false;
+    return quiz.course.ownerId === userId;
   }
 }

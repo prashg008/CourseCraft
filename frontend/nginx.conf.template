@@ -1,0 +1,23 @@
+# This file is now a template for envsubst. Use docker-entrypoint.sh to generate nginx.conf
+server {
+    listen 80;
+    server_name _;
+
+    root /usr/share/nginx/html;
+    index index.html;
+
+    # Serve static assets normally
+    location / {
+        add_header 'Access-Control-Allow-Origin' "${CORS_ORIGIN}";
+        add_header 'Access-Control-Allow-Methods' 'GET, POST, OPTIONS, PUT, DELETE';
+        add_header 'Access-Control-Allow-Headers' 'Origin, Content-Type, Accept, Authorization';
+        add_header 'Access-Control-Allow-Credentials' 'true';
+        try_files $uri $uri/ /index.html;
+    }
+
+    # Allow deep links to fallback to SPA entrypoint
+    error_page 404 /index.html;
+    location = /index.html {
+        add_header Cache-Control "no-cache";
+    }
+}

@@ -7,7 +7,7 @@ export interface CourseGenerationPayload {
   progress: number; // 0-100
   message?: string;
   errorMessage?: string;
-  course?: any; // Full course data when completed
+  course?: unknown; // Full course data when completed
 }
 
 export interface ModuleGenerationPayload {
@@ -17,7 +17,7 @@ export interface ModuleGenerationPayload {
   currentStage: 'creating' | 'reviewing' | 'refining' | 'completed';
   progress: number;
   errorMessage?: string;
-  module?: any;
+  module?: unknown;
 }
 
 export interface QuizGenerationPayload {
@@ -27,13 +27,13 @@ export interface QuizGenerationPayload {
   currentStage: 'creating' | 'reviewing' | 'refining' | 'completed';
   progress: number;
   errorMessage?: string;
-  quiz?: any;
+  quiz?: unknown;
 }
 
 export interface CourseUpdatePayload {
   courseId: string;
   action: 'update' | 'delete' | 'publish' | 'unpublish';
-  data?: any;
+  data?: unknown;
 }
 
 export interface SubscriptionData {

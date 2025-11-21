@@ -1,5 +1,18 @@
-import axios, { AxiosError } from 'axios';
-import type { AxiosInstance, AxiosRequestHeaders } from 'axios';
+// Custom error class for API errors
+class ApiError extends Error {
+  public problem: string | null | undefined;
+  public data: unknown;
+  public status: number | undefined;
+  constructor(message: string, problem?: string | null, data?: unknown, status?: number) {
+    super(message);
+    this.problem = problem;
+    this.data = data;
+    this.status = status;
+    Object.setPrototypeOf(this, ApiError.prototype);
+  }
+}
+import { create as createApi } from 'apisauce';
+import type { ApisauceInstance } from 'apisauce';
 import type {
   Course,
   Module,
@@ -21,189 +34,164 @@ import { camelizeKeys } from '@/utils/casing';
 export const API_BASE_URL = import.meta.env.VITE_API_BASE_URL ?? 'http://localhost:3000/api';
 export const WS_BASE_URL = import.meta.env.VITE_WS_BASE_URL ?? 'http://localhost:3000';
 
-// Create axios instance
-const apiClient: AxiosInstance = axios.create({
+// Create apisauce instance
+const apiClient: ApisauceInstance = createApi({
   baseURL: API_BASE_URL,
-  headers: {
-    'Content-Type': 'application/json',
-  },
+  headers: { 'Content-Type': 'application/json' },
+  timeout: 10000,
 });
 
-// Request interceptor to add auth token
-apiClient.interceptors.request.use(
-  config => {
-    const token = localStorage.getItem('authToken');
-    const headers = (config.headers ?? {}) as AxiosRequestHeaders;
-    if (token) {
-      headers.Authorization = `Bearer ${token}`;
-    }
-    config.headers = headers;
-    return config;
-  },
-  error => Promise.reject(error)
-);
-
-// Response interceptor for error handling
-apiClient.interceptors.response.use(
-  response => {
-    response.data = camelizeKeys(response.data);
-    return response;
-  },
-  (error: AxiosError) => {
-    if (error.response?.status === 401) {
-      localStorage.removeItem('authToken');
-      localStorage.removeItem('user');
-      window.location.href = '/login';
-    }
-    return Promise.reject(error);
+// Request transform to add auth token
+apiClient.addRequestTransform(request => {
+  const token = localStorage.getItem('authToken');
+  if (token) {
+    request.headers = { ...request.headers, Authorization: `Bearer ${token}` };
   }
-);
+});
+
+// Response transform for camelCase, 401 handling, and error throwing
+apiClient.addResponseTransform(response => {
+  if (response.status === 401) {
+    localStorage.removeItem('authToken');
+    localStorage.removeItem('user');
+    window.location.href = '/login';
+  }
+  if (response.data) {
+    response.data = camelizeKeys(response.data);
+  }
+  // Explicitly throw error for non-ok responses
+  if (!response.ok) {
+    throw new ApiError('API Error', response.problem, response.data, response.status);
+  }
+});
 
 // Helper function to handle API errors
-const handleApiError = (error: unknown): Error => {
-  if (axios.isAxiosError(error)) {
-    const message =
-      error.response?.data?.message ||
-      error.response?.data?.error ||
-      error.message ||
-      'An error occurred';
-    return new Error(message);
-  }
-
-  if (error instanceof Error) {
-    return error;
-  }
-
-  return new Error('An unexpected error occurred');
+import type { MessageResponse as MsgResp } from '../types';
+function isErrorObj(obj: unknown): obj is { error?: string } {
+  return typeof obj === 'object' && obj !== null && 'error' in obj;
+}
+function isMessageObj(obj: unknown): obj is { message?: string } {
+  return typeof obj === 'object' && obj !== null && 'message' in obj;
+}
+const handleApiError = (problem: unknown, data?: MsgResp): Error => {
+  let message = data?.message;
+  if (!message && isErrorObj(data)) message = data.error;
+  if (!message && isMessageObj(problem)) message = problem.message;
+  if (!message) message = 'An error occurred';
+  return new Error(message);
 };
 
-// Authentication API
 export const authApi = {
   async register(
     username: string,
     email: string,
     password: string
   ): Promise<ApiResponse<{ accessToken: string; user: User }>> {
-    try {
-      const response = await apiClient.post('/auth/register', { username, email, password });
-      return {
-        success: response.statusText === 'OK',
-        data: response.data,
-        message: response.statusText,
-      };
-    } catch (error) {
-      throw handleApiError(error);
+    const { ok, data, problem } = await apiClient.post('/auth/register', {
+      username,
+      email,
+      password,
+    });
+    if (ok && data) {
+      return { success: true, data: data as { accessToken: string; user: User } };
     }
+    throw handleApiError(problem as MsgResp, data as MsgResp);
   },
 
   async login(
     email: string,
     password: string
   ): Promise<ApiResponse<{ accessToken: string; user: User }>> {
-    try {
-      const response = await apiClient.post('/auth/login', { email, password });
-      return {
-        success: response.statusText === 'OK',
-        data: response.data,
-        message: response.statusText,
-      };
-    } catch (error) {
-      throw handleApiError(error);
+    const { ok, data, problem } = await apiClient.post('/auth/login', { email, password });
+    if (ok && data) {
+      return { success: true, data: data as { accessToken: string; user: User } };
     }
+    throw handleApiError(problem as MsgResp, data as MsgResp);
   },
 
   async logout(): Promise<ApiResponse<null>> {
-    try {
-      const response = await apiClient.post('/auth/logout');
-      return {
-        success: response.statusText === 'OK',
-        data: response.data,
-        message: response.statusText,
-      };
-    } catch (error) {
-      throw handleApiError(error);
+    const { ok, data, problem } = await apiClient.post('/auth/logout');
+    if (ok) {
+      return { success: true, data: null };
     }
+    throw handleApiError(problem as MsgResp, data as MsgResp);
   },
 
   async me(): Promise<ApiResponse<User>> {
-    try {
-      const response = await apiClient.get('/auth/profile');
-      // Backend returns user object directly, not wrapped in {success, data}
-      return {
-        success: true,
-        data: response.data,
-      };
-    } catch (error) {
-      throw handleApiError(error);
+    const { ok, data, problem } = await apiClient.get('/auth/profile');
+    if (ok && data) {
+      return { success: true, data: data as User };
     }
+    throw handleApiError(problem as MsgResp, data as MsgResp);
   },
 };
 
 // Courses API
 export const coursesApi = {
   async getAll(filters?: CourseFilters): Promise<PaginatedResponse<Course>> {
-    try {
-      const page = filters?.page ?? 1;
-      const pageSize = filters?.pageSize ?? 10;
-      const sortBy = filters?.sortBy === 'title' ? 'title' : 'createdAt';
-      const sortOrder = (filters?.sortOrder ?? 'desc').toUpperCase() === 'ASC' ? 'ASC' : 'DESC';
+    const page = filters?.page ?? 1;
+    const pageSize = filters?.pageSize ?? 10;
+    const sortBy = filters?.sortBy === 'title' ? 'title' : 'createdAt';
+    const sortOrder = (filters?.sortOrder ?? 'desc').toUpperCase() === 'ASC' ? 'ASC' : 'DESC';
 
-      const params: Record<string, unknown> = {
-        page,
-        limit: pageSize,
-        sortBy,
-        order: sortOrder,
+    const params: Record<string, unknown> = {
+      page,
+      limit: pageSize,
+      sortBy,
+      order: sortOrder,
+    };
+
+    if (filters?.search) {
+      params.search = filters.search;
+    }
+
+    if (filters?.status && filters.status !== 'all') {
+      params.status = filters.status;
+    }
+
+    const { ok, data, problem } = await apiClient.get('/courses', params);
+    if (ok && data) {
+      const { data: courseData = [], meta } = data as {
+        data: Course[];
+        meta?: Record<string, unknown>;
       };
-
-      if (filters?.search) {
-        params.search = filters.search;
-      }
-
-      if (filters?.status && filters.status !== 'all') {
-        params.status = filters.status;
-      }
-
-      const response = await apiClient.get('/courses', { params });
-      const { data = [], meta } = response.data ?? {};
-      const totalItems = meta?.total ?? data.length;
-      const resolvedPageSize = meta?.limit ?? pageSize;
-      const totalPages = meta?.totalPages ?? Math.ceil(totalItems / (resolvedPageSize || 1));
-
+      const metaNum = meta as {
+        total?: number;
+        limit?: number;
+        totalPages?: number;
+        page?: number;
+      };
+      const totalItems = metaNum?.total ?? courseData.length;
+      const resolvedPageSize = metaNum?.limit ?? pageSize;
+      const totalPages = metaNum?.totalPages ?? Math.ceil(totalItems / (resolvedPageSize || 1));
       return {
-        data,
+        data: courseData,
         total: totalItems,
-        page: meta?.page ?? page,
+        page: metaNum?.page ?? page,
         pageSize: resolvedPageSize,
         totalPages,
       };
-    } catch (error) {
-      throw handleApiError(error);
     }
+    throw handleApiError(problem as MsgResp, data as MsgResp);
   },
 
   async getById(id: string): Promise<ApiResponse<Course>> {
-    try {
-      const response = await apiClient.get(`/courses/${id}`);
-      return {
-        success: true,
-        data: response.data,
-      };
-    } catch (error) {
-      throw handleApiError(error);
+    const { ok, data, problem } = await apiClient.get(`/courses/${id}`);
+    if (ok && data) {
+      return { success: true, data: data as Course };
     }
+    throw handleApiError(problem as MsgResp, data as MsgResp);
   },
 
   async create(data: CourseFormData): Promise<ApiResponse<Course>> {
-    try {
-      const response = await apiClient.post('/courses', data);
-      return {
-        success: true,
-        data: response.data,
-        message: 'Course created successfully',
-      };
-    } catch (error) {
-      throw handleApiError(error);
+    const { ok, data: respData, problem } = await apiClient.post('/courses', data);
+    if (ok && respData) {
+      return { success: true, data: respData as Course, message: 'Course created successfully' };
     }
+    throw handleApiError(
+      problem as import('../types').MessageResponse,
+      respData as import('../types').MessageResponse
+    );
   },
 
   async update(id: string, data: Partial<Course>): Promise<ApiResponse<Course>> {
@@ -211,11 +199,14 @@ export const coursesApi = {
       const response = await apiClient.patch(`/courses/${id}`, data);
       return {
         success: true,
-        data: response.data,
+        data: response.data as Course,
         message: 'Course updated successfully',
       };
-    } catch (error) {
-      throw handleApiError(error);
+    } catch (error: unknown) {
+      if (error instanceof ApiError) {
+        throw handleApiError(error.problem, error.data as import('../types').MessageResponse);
+      }
+      throw error;
     }
   },
 
@@ -224,11 +215,14 @@ export const coursesApi = {
       const response = await apiClient.patch(`/courses/${id}/details`, data);
       return {
         success: true,
-        data: response.data,
+        data: response.data as Course,
         message: 'Course details updated successfully',
       };
-    } catch (error) {
-      throw handleApiError(error);
+    } catch (error: unknown) {
+      if (error instanceof ApiError) {
+        throw handleApiError(error.problem, error.data as import('../types').MessageResponse);
+      }
+      throw error;
     }
   },
 
@@ -240,73 +234,55 @@ export const coursesApi = {
         data: null,
         message: 'Course deleted successfully',
       };
-    } catch (error) {
-      throw handleApiError(error);
+    } catch (error: unknown) {
+      if (error instanceof ApiError) {
+        throw handleApiError(error.problem, error.data as import('../types').MessageResponse);
+      }
+      throw error;
     }
   },
 
   async publish(id: string): Promise<ApiResponse<Course>> {
-    try {
-      const response = await apiClient.post(`/courses/${id}/publish`);
-      return {
-        success: true,
-        data: response.data,
-        message: 'Course published successfully',
-      };
-    } catch (error) {
-      throw handleApiError(error);
+    const { ok, data, problem } = await apiClient.post(`/courses/${id}/publish`);
+    if (ok && data) {
+      return { success: true, data: data as Course, message: 'Course published successfully' };
     }
+    throw handleApiError(problem as MsgResp, data as MsgResp);
   },
 
   async unpublish(id: string): Promise<ApiResponse<Course>> {
-    try {
-      const response = await apiClient.post(`/courses/${id}/unpublish`);
-      return {
-        success: true,
-        data: response.data,
-        message: 'Course moved to draft',
-      };
-    } catch (error) {
-      throw handleApiError(error);
+    const { ok, data, problem } = await apiClient.post(`/courses/${id}/unpublish`);
+    if (ok && data) {
+      return { success: true, data: data as Course, message: 'Course moved to draft' };
     }
+    throw handleApiError(problem as MsgResp, data as MsgResp);
   },
 
   async archive(id: string): Promise<ApiResponse<Course>> {
-    try {
-      const response = await apiClient.post(`/courses/${id}/archive`);
-      return {
-        success: true,
-        data: response.data,
-        message: 'Course archived successfully',
-      };
-    } catch (error) {
-      throw handleApiError(error);
+    const { ok, data, problem } = await apiClient.post(`/courses/${id}/archive`);
+    if (ok && data) {
+      return { success: true, data: data as Course, message: 'Course archived successfully' };
     }
+    throw handleApiError(problem as MsgResp, data as MsgResp);
   },
 
   async unarchive(id: string): Promise<ApiResponse<Course>> {
-    try {
-      const response = await apiClient.post(`/courses/${id}/unarchive`);
-      return {
-        success: true,
-        data: response.data,
-        message: 'Course unarchived successfully',
-      };
-    } catch (error) {
-      throw handleApiError(error);
+    const { ok, data, problem } = await apiClient.post(`/courses/${id}/unarchive`);
+    if (ok && data) {
+      return { success: true, data: data as Course, message: 'Course unarchived successfully' };
     }
+    throw handleApiError(problem as MsgResp, data as MsgResp);
   },
 
   async getArchivedCourses(): Promise<ApiResponse<Course[]>> {
-    try {
-      const response = await apiClient.get('/courses/archived');
-      return {
-        success: true,
-        data: response.data,
-      };
-    } catch (error) {
-      throw handleApiError(error);
+    const { ok, data, problem } = await apiClient.get('/courses/archived');
+    if (ok && data) {
+      return { success: true, data: data as Course[] };
     }
+    throw handleApiError(
+      problem as import('../types').MessageResponse,
+      data as import('../types').MessageResponse
+    );
   },
 
   async regenerateModule(
@@ -314,37 +290,40 @@ export const coursesApi = {
     moduleId: string,
     request?: RegenerationRequest
   ): Promise<ApiResponse<GenerationTask>> {
-    try {
-      const payload = request ? { feedback: request.feedback } : {};
-      const response = await apiClient.post(
-        `/courses/${courseId}/modules/${moduleId}/regenerate`,
-        payload
-      );
-      return {
-        success: true,
-        data: response.data,
-        message: response.data.message || 'Module regeneration started',
-      };
-    } catch (error) {
-      throw handleApiError(error);
+    const payload = request ? { feedback: request.feedback } : {};
+    const { ok, data, problem } = await apiClient.post(
+      `/courses/${courseId}/modules/${moduleId}/regenerate`,
+      payload
+    );
+    if (ok && data) {
+      const msg =
+        (data as import('../types').MessageResponse).message || 'Module regeneration started';
+      return { success: true, data: data as GenerationTask, message: msg };
     }
+    throw handleApiError(
+      problem as import('../types').MessageResponse,
+      data as import('../types').MessageResponse
+    );
   },
 
   async regenerateQuiz(
     courseId: string,
     request?: RegenerationRequest
   ): Promise<ApiResponse<GenerationTask>> {
-    try {
-      const payload = request ? { feedback: request.feedback } : {};
-      const response = await apiClient.post(`/courses/${courseId}/quiz/regenerate`, payload);
-      return {
-        success: true,
-        data: response.data,
-        message: response.data.message || 'Quiz regeneration started',
-      };
-    } catch (error) {
-      throw handleApiError(error);
+    const payload = request ? { feedback: request.feedback } : {};
+    const { ok, data, problem } = await apiClient.post(
+      `/courses/${courseId}/quiz/regenerate`,
+      payload
+    );
+    if (ok && data) {
+      const msg =
+        (data as import('../types').MessageResponse).message || 'Quiz regeneration started';
+      return { success: true, data: data as GenerationTask, message: msg };
     }
+    throw handleApiError(
+      problem as import('../types').MessageResponse,
+      data as import('../types').MessageResponse
+    );
   },
 };
 
@@ -356,29 +335,19 @@ export const modulesApi = {
     description: string;
     order: number;
   }): Promise<ApiResponse<Module>> {
-    try {
-      const response = await apiClient.post('/modules', data);
-      return {
-        success: true,
-        data: response.data,
-        message: 'Module created successfully',
-      };
-    } catch (error) {
-      throw handleApiError(error);
+    const { ok, data: respData, problem } = await apiClient.post('/modules', data);
+    if (ok && respData) {
+      return { success: true, data: respData as Module, message: 'Module created successfully' };
     }
+    throw handleApiError(problem as MsgResp, respData as MsgResp);
   },
 
   async update(id: string, data: Partial<Module>): Promise<ApiResponse<Module>> {
-    try {
-      const response = await apiClient.patch(`/modules/${id}`, data);
-      return {
-        success: true,
-        data: response.data,
-        message: 'Module updated successfully',
-      };
-    } catch (error) {
-      throw handleApiError(error);
+    const { ok, data: respData, problem } = await apiClient.patch(`/modules/${id}`, data);
+    if (ok && respData) {
+      return { success: true, data: respData as Module, message: 'Module updated successfully' };
     }
+    throw handleApiError(problem as MsgResp, respData as MsgResp);
   },
 
   async delete(id: string): Promise<ApiResponse<null>> {
@@ -389,8 +358,11 @@ export const modulesApi = {
         data: null,
         message: 'Module deleted successfully',
       };
-    } catch (error) {
-      throw handleApiError(error);
+    } catch (error: unknown) {
+      if (error instanceof ApiError) {
+        throw handleApiError(error.problem, error.data as import('../types').MessageResponse);
+      }
+      throw error;
     }
   },
 };
@@ -403,29 +375,19 @@ export const lessonsApi = {
     content: string;
     order: number;
   }): Promise<ApiResponse<Lesson>> {
-    try {
-      const response = await apiClient.post('/lessons', data);
-      return {
-        success: true,
-        data: response.data,
-        message: 'Lesson created successfully',
-      };
-    } catch (error) {
-      throw handleApiError(error);
+    const { ok, data: respData, problem } = await apiClient.post('/lessons', data);
+    if (ok && respData) {
+      return { success: true, data: respData as Lesson, message: 'Lesson created successfully' };
     }
+    throw handleApiError(problem as MsgResp, respData as MsgResp);
   },
 
   async update(id: string, data: Partial<Lesson>): Promise<ApiResponse<Lesson>> {
-    try {
-      const response = await apiClient.patch(`/lessons/${id}`, data);
-      return {
-        success: true,
-        data: response.data,
-        message: 'Lesson updated successfully',
-      };
-    } catch (error) {
-      throw handleApiError(error);
+    const { ok, data: respData, problem } = await apiClient.patch(`/lessons/${id}`, data);
+    if (ok && respData) {
+      return { success: true, data: respData as Lesson, message: 'Lesson updated successfully' };
     }
+    throw handleApiError(problem as MsgResp, respData as MsgResp);
   },
 
   async delete(id: string): Promise<ApiResponse<null>> {
@@ -436,8 +398,11 @@ export const lessonsApi = {
         data: null,
         message: 'Lesson deleted successfully',
       };
-    } catch (error) {
-      throw handleApiError(error);
+    } catch (error: unknown) {
+      if (error instanceof ApiError) {
+        throw handleApiError(error.problem, error.data as import('../types').MessageResponse);
+      }
+      throw error;
     }
   },
 };
@@ -445,16 +410,11 @@ export const lessonsApi = {
 // Quiz API
 export const quizApi = {
   async create(data: { course: string }): Promise<ApiResponse<Quiz>> {
-    try {
-      const response = await apiClient.post('/quizzes', data);
-      return {
-        success: true,
-        data: response.data,
-        message: 'Quiz created successfully',
-      };
-    } catch (error) {
-      throw handleApiError(error);
+    const { ok, data: respData, problem } = await apiClient.post('/quizzes', data);
+    if (ok && respData) {
+      return { success: true, data: respData as Quiz, message: 'Quiz created successfully' };
     }
+    throw handleApiError(problem as MsgResp, respData as MsgResp);
   },
 
   async delete(id: string): Promise<ApiResponse<null>> {
@@ -466,7 +426,7 @@ export const quizApi = {
         message: 'Quiz deleted successfully',
       };
     } catch (error) {
-      throw handleApiError(error);
+      throw handleApiError(error as import('../types').MessageResponse, undefined);
     }
   },
 };
@@ -476,50 +436,54 @@ export const questionsApi = {
   async create(
     data: { quiz: string; order: number } & QuestionFormData
   ): Promise<ApiResponse<Question>> {
-    try {
-      const response = await apiClient.post('/questions', {
-        quizId: data.quiz,
-        text: data.text,
-        type: data.type,
-        order: data.order,
-        answers: data.answers.map((answer, index) => ({
-          text: answer.text,
-          isCorrect: answer.isCorrect,
-          order: index + 1,
-        })),
-      });
+    const {
+      ok,
+      data: respData,
+      problem,
+    } = await apiClient.post('/questions', {
+      quizId: data.quiz,
+      text: data.text,
+      type: data.type,
+      order: data.order,
+      answers: data.answers.map((answer, index) => ({
+        text: answer.text,
+        isCorrect: answer.isCorrect,
+        order: index + 1,
+      })),
+    });
+    if (ok && respData) {
       return {
         success: true,
-        data: response.data,
+        data: respData as Question,
         message: 'Question created successfully',
       };
-    } catch (error) {
-      throw handleApiError(error);
     }
+    throw handleApiError(problem as MsgResp, respData as MsgResp);
   },
 
   async update(id: string, data: Partial<QuestionFormData>): Promise<ApiResponse<Question>> {
-    try {
-      const payload: Record<string, unknown> = {};
-      if (data.text) payload.text = data.text;
-      if (data.type) payload.type = data.type;
-      if (data.answers) {
-        payload.answers = data.answers.map((answer, index) => ({
-          text: answer.text,
-          isCorrect: answer.isCorrect,
-          order: index + 1,
-        }));
-      }
-
-      const response = await apiClient.patch(`/questions/${id}`, payload);
+    const payload: Record<string, unknown> = {};
+    if (data.text) payload.text = data.text;
+    if (data.type) payload.type = data.type;
+    if (data.answers) {
+      payload.answers = data.answers.map((answer, index) => ({
+        text: answer.text,
+        isCorrect: answer.isCorrect,
+        order: index + 1,
+      }));
+    }
+    const { ok, data: respData, problem } = await apiClient.patch(`/questions/${id}`, payload);
+    if (ok && respData) {
       return {
         success: true,
-        data: response.data,
+        data: respData as Question,
         message: 'Question updated successfully',
       };
-    } catch (error) {
-      throw handleApiError(error);
     }
+    throw handleApiError(
+      problem as import('../types').MessageResponse,
+      respData as import('../types').MessageResponse
+    );
   },
 
   async delete(id: string): Promise<ApiResponse<null>> {
@@ -531,7 +495,7 @@ export const questionsApi = {
         message: 'Question deleted successfully',
       };
     } catch (error) {
-      throw handleApiError(error);
+      throw handleApiError(error as import('../types').MessageResponse, undefined);
     }
   },
 };
@@ -539,57 +503,53 @@ export const questionsApi = {
 // AI Generation API
 export const aiApi = {
   async generateCourse(courseId: string): Promise<ApiResponse<{ task_id: string }>> {
-    try {
-      const response = await apiClient.post(`/courses/${courseId}/regenerate`);
-      return {
-        success: true,
-        data: { task_id: courseId }, // Return courseId as task_id for compatibility
-        message: response.data.message || 'Course regeneration started',
-      };
-    } catch (error) {
-      throw handleApiError(error);
+    const { ok, data, problem } = await apiClient.post(`/courses/${courseId}/regenerate`);
+    if (ok && data) {
+      const msg =
+        (data as import('../types').MessageResponse).message || 'Course regeneration started';
+      return { success: true, data: { task_id: courseId }, message: msg };
     }
+    throw handleApiError(problem as MsgResp, data as MsgResp);
   },
 
   async generateModule(moduleId: string): Promise<ApiResponse<{ task_id: string }>> {
-    try {
-      const response = await apiClient.post(`/ai/generate/module/${moduleId}`);
-      return {
-        success: response.data.success,
-        data: { task_id: response.data.data.id },
-        message: response.data.message,
-      };
-    } catch (error) {
-      throw handleApiError(error);
+    const { ok, data, problem } = await apiClient.post(`/ai/generate/module/${moduleId}`);
+    if (ok && data) {
+      const resp = data as import('../types').SuccessDataResponse<
+        { id: string } & import('../types').MessageResponse
+      >;
+      const id = resp.data?.id;
+      const msg = resp.message;
+      return { success: resp.success, data: { task_id: id }, message: msg };
     }
+    throw handleApiError(problem as MsgResp, data as MsgResp);
   },
 
   async getTaskStatus(taskId: string): Promise<ApiResponse<Record<string, unknown>>> {
-    try {
-      const response = await apiClient.get(`/ai/tasks/${taskId}/status`);
-      return {
-        success: response.data.success,
-        data: response.data.data,
-      };
-    } catch (error) {
-      throw handleApiError(error);
+    const { ok, data, problem } = await apiClient.get(`/ai/tasks/${taskId}/status`);
+    if (ok && data) {
+      const resp = data as import('../types').SuccessDataResponse<Record<string, unknown>>;
+      return { success: resp.success, data: resp.data };
     }
+    throw handleApiError(problem as MsgResp, data as MsgResp);
   },
 
   async getTasks(page: number = 1): Promise<PaginatedResponse<Record<string, unknown>>> {
-    try {
-      const response = await apiClient.get('/ai/tasks', { params: { page } });
+    const { ok, data, problem } = await apiClient.get('/ai/tasks', { params: { page } });
+    if (ok && data) {
+      const resp = data as import('../types').CountResultsResponse<Record<string, unknown>>;
       return {
-        data: response.data.results,
-        total: response.data.count,
+        data: resp.results,
+        total: resp.count,
         page,
         pageSize: 10,
-        totalPages: Math.ceil(response.data.count / 10),
+        totalPages: Math.ceil(resp.count / 10),
       };
-    } catch (error) {
-      throw handleApiError(error);
     }
+    throw handleApiError(
+      problem as import('../types').MessageResponse,
+      data as import('../types').MessageResponse
+    );
   },
 };
-
 export default apiClient;

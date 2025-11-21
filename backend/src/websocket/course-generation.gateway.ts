@@ -3,14 +3,25 @@ import {
   WebSocketServer,
   OnGatewayConnection,
   OnGatewayDisconnect,
+  OnGatewayInit,
   SubscribeMessage,
   MessageBody,
   ConnectedSocket,
 } from '@nestjs/websockets';
 import { Server, Socket } from 'socket.io';
-import { Logger, UseGuards } from '@nestjs/common';
+import { Logger } from '@nestjs/common';
+import { CoursesService } from '../courses/courses.service';
+import { Inject, forwardRef } from '@nestjs/common';
 import { JwtService } from '@nestjs/jwt';
 import { ConfigService } from '@nestjs/config';
+import { GenerationSnapshotService } from './snapshot.service';
+import type {
+  EventEnvelope,
+  CourseGenerationPayload,
+  ModuleGenerationPayload,
+  QuizGenerationPayload,
+  ErrorPayload,
+} from './contracts/events';
 
 interface AuthenticatedSocket extends Socket {
   userId?: string;
@@ -29,7 +40,9 @@ interface AuthenticatedSocket extends Socket {
   },
   namespace: '/ws',
 })
-export class CourseGenerationGateway implements OnGatewayConnection, OnGatewayDisconnect {
+export class CourseGenerationGateway
+  implements OnGatewayConnection, OnGatewayDisconnect, OnGatewayInit
+{
   @WebSocketServer()
   server: Server;
 
@@ -38,34 +51,57 @@ export class CourseGenerationGateway implements OnGatewayConnection, OnGatewayDi
   constructor(
     private readonly jwtService: JwtService,
     private readonly configService: ConfigService,
+    private readonly snapshotService: GenerationSnapshotService,
+    @Inject(forwardRef(() => CoursesService))
+    private readonly coursesService: CoursesService,
   ) {}
 
-  async handleConnection(client: AuthenticatedSocket) {
-    try {
-      // Extract token from handshake auth or query
-      const token =
-        client.handshake.auth?.token ||
-        client.handshake.headers?.authorization?.replace('Bearer ', '');
+  handleConnection(client: AuthenticatedSocket) {
+    // The connection-level JWT verification is handled in the server middleware
+    // registered in `afterInit`. Here we simply verify middleware attached `userId`.
+    if (!client.userId) {
+      this.logger.warn(`Unauthenticated client attempted to connect: ${client.id}`);
+      try {
+        client.disconnect(true);
+      } catch {
+        // ignore
+      }
+      return;
+    }
+
+    this.logger.log(`Client connected: ${client.id} (User: ${client.userId})`);
+  }
+
+  afterInit(server: Server) {
+    // Attach a Socket.IO middleware to validate JWT on handshake and attach userId
+    // to the socket. This prevents unauthenticated sockets from establishing.
+    server.use((socket: Socket & { userId?: string }, next: (err?: Error) => void) => {
+      const token: string =
+        typeof socket.handshake?.auth?.token === 'string'
+          ? socket.handshake.auth.token
+          : typeof socket.handshake?.headers?.authorization === 'string'
+            ? String(socket.handshake.headers.authorization).replace('Bearer··', '')
+            : typeof socket.handshake?.query?.token === 'string'
+              ? String(socket.handshake.query.token)
+              : '';
 
       if (!token) {
-        this.logger.warn(`Client ${client.id} attempted to connect without token`);
-        client.disconnect();
-        return;
+        return next(new Error('Unauthorized'));
       }
 
-      // Verify JWT token
-      const payload = await this.jwtService.verifyAsync(token, {
-        secret: this.configService.get<string>('jwt.secret'),
-      });
-
-      // Attach userId to socket
-      client.userId = payload.sub;
-
-      this.logger.log(`Client connected: ${client.id} (User: ${client.userId})`);
-    } catch (error: any) {
-      this.logger.error(`Authentication failed for client ${client.id}: ${error.message}`);
-      client.disconnect();
-    }
+      // verify token (use promise chain so middleware is not async)
+      this.jwtService
+        .verifyAsync(token, { secret: this.configService.get<string>('jwt.secret') })
+        .then((payload: unknown) => {
+          // attach to socket for later handlers
+          const maybe = payload as Record<string, unknown>;
+          const subVal = maybe && typeof maybe.sub === 'string' ? maybe.sub : null;
+          socket.userId = subVal ?? undefined;
+          if (!socket.userId) return next(new Error('Unauthorized'));
+          next();
+        })
+        .catch(() => next(new Error('Unauthorized')));
+    });
   }
 
   handleDisconnect(client: AuthenticatedSocket) {
@@ -73,28 +109,28 @@ export class CourseGenerationGateway implements OnGatewayConnection, OnGatewayDi
   }
 
   @SubscribeMessage('joinCourse')
-  handleJoinCourse(
+  async handleJoinCourse(
     @ConnectedSocket() client: AuthenticatedSocket,
     @MessageBody() data: { courseId: string },
   ) {
     const { courseId } = data;
     const roomName = `course:${courseId}`;
 
-    client.join(roomName);
+    await client.join(roomName);
     this.logger.log(`Client ${client.id} joined room: ${roomName}`);
 
     return { success: true, message: `Joined course ${courseId}` };
   }
 
   @SubscribeMessage('leaveCourse')
-  handleLeaveCourse(
+  async handleLeaveCourse(
     @ConnectedSocket() client: AuthenticatedSocket,
     @MessageBody() data: { courseId: string },
   ) {
     const { courseId } = data;
     const roomName = `course:${courseId}`;
 
-    client.leave(roomName);
+    await client.leave(roomName);
     this.logger.log(`Client ${client.id} left room: ${roomName}`);
 
     return { success: true, message: `Left course ${courseId}` };
@@ -102,7 +138,7 @@ export class CourseGenerationGateway implements OnGatewayConnection, OnGatewayDi
 
   // Handle subscribe messages from frontend (maps to joinCourse)
   @SubscribeMessage('subscribe')
-  handleSubscribe(
+  async handleSubscribe(
     @ConnectedSocket() client: AuthenticatedSocket,
     @MessageBody() data: { event: string; id?: string },
   ) {
@@ -112,19 +148,43 @@ export class CourseGenerationGateway implements OnGatewayConnection, OnGatewayDi
       return { success: false, message: 'ID is required for subscription' };
     }
 
-    // Map event types to room names
-    let roomName: string;
-    if (event === 'course:generation') {
-      roomName = `course:${id}`;
-    } else if (event === 'module:generation') {
-      roomName = `course:${id}`; // Modules emit to course room
-    } else if (event === 'quiz:generation') {
-      roomName = `course:${id}`; // Quiz emits to course room
-    } else {
+    // Compose composite room/event name: e.g. 'course:generation:{id}'
+    const roomName = `${event}:${id}`;
+
+    // Basic validation for allowed event prefixes
+    if (!/^course:|^module:|^quiz:/.test(event)) {
       return { success: false, message: `Unknown event type: ${event}` };
     }
 
-    client.join(roomName);
+    // Ensure authenticated user
+    const userId = client.userId;
+    if (!userId) {
+      this.logger.warn(`Unauthenticated socket attempted to subscribe: ${client.id}`);
+      return { success: false, message: 'Unauthorized' };
+    }
+
+    // Authorization checks per entity
+    const entity = event.split(':')[0];
+    let allowed = false;
+    try {
+      if (entity === 'course') {
+        allowed = await this.coursesService.canAccessCourse(id, userId);
+      } else if (entity === 'module') {
+        allowed = await this.coursesService.canAccessModule(id, userId);
+      } else if (entity === 'quiz') {
+        allowed = await this.coursesService.canAccessQuiz(id, userId);
+      }
+    } catch {
+      this.logger.warn(`Authorization check failed for ${entity}:${id} user=${userId}`);
+      allowed = false;
+    }
+
+    if (!allowed) {
+      this.logger.warn(`User ${userId} is not authorized for ${entity}:${id}`);
+      return { success: false, message: 'Unauthorized' };
+    }
+
+    await client.join(roomName);
     this.logger.log(`Client ${client.id} subscribed to ${event} (room: ${roomName})`);
 
     return { success: true, message: `Subscribed to ${event}` };
@@ -132,7 +192,7 @@ export class CourseGenerationGateway implements OnGatewayConnection, OnGatewayDi
 
   // Handle unsubscribe messages from frontend
   @SubscribeMessage('unsubscribe')
-  handleUnsubscribe(
+  async handleUnsubscribe(
     @ConnectedSocket() client: AuthenticatedSocket,
     @MessageBody() data: { event: string; id?: string },
   ) {
@@ -141,19 +201,13 @@ export class CourseGenerationGateway implements OnGatewayConnection, OnGatewayDi
     if (!id) {
       return { success: false, message: 'ID is required for unsubscription' };
     }
+    const roomName = `${event}:${id}`;
 
-    let roomName: string;
-    if (event === 'course:generation') {
-      roomName = `course:${id}`;
-    } else if (event === 'module:generation') {
-      roomName = `course:${id}`;
-    } else if (event === 'quiz:generation') {
-      roomName = `course:${id}`;
-    } else {
+    if (!/^course:|^module:|^quiz:/.test(event)) {
       return { success: false, message: `Unknown event type: ${event}` };
     }
 
-    client.leave(roomName);
+    await client.leave(roomName);
     this.logger.log(`Client ${client.id} unsubscribed from ${event} (room: ${roomName})`);
 
     return { success: true, message: `Unsubscribed from ${event}` };
@@ -161,49 +215,77 @@ export class CourseGenerationGateway implements OnGatewayConnection, OnGatewayDi
 
   // Emit progress updates to a specific course room
   emitCourseProgress(courseId: string, progress: number, message: string) {
-    const roomName = `course:${courseId}`;
-    this.server.to(roomName).emit('course:generation', {
+    const roomName = `course:generation:${courseId}`;
+    const eventName = roomName; // composite event key
+    const payload: CourseGenerationPayload = {
       courseId,
       status: progress >= 100 ? 'completed' : 'generating',
       currentStage: this.determineStage(progress),
       progress,
       message,
+    };
+
+    const envelope: EventEnvelope<CourseGenerationPayload> = {
+      version: 'v1',
+      event: eventName,
       timestamp: new Date().toISOString(),
-    });
-    this.logger.log(`Emitted course:generation to ${roomName}: ${progress}% - ${message}`);
+      payload,
+    };
+    // persist latest snapshot for late-joiners
+    this.snapshotService.set(roomName, envelope.payload);
+
+    this.server.to(roomName).emit(eventName, envelope);
+    this.logger.log(`Emitted ${eventName} to ${roomName}: ${progress}% - ${message}`);
   }
 
   // Emit completion notification
   emitCourseComplete(courseId: string, message: string) {
-    const roomName = `course:${courseId}`;
-    this.server.to(roomName).emit('course:generation', {
+    const roomName = `course:generation:${courseId}`;
+    const eventName = roomName;
+    const payload: CourseGenerationPayload = {
       courseId,
       status: 'completed',
       currentStage: 'completed',
       progress: 100,
       message,
+    };
+    const envelope: EventEnvelope<CourseGenerationPayload> = {
+      version: 'v1',
+      event: eventName,
       timestamp: new Date().toISOString(),
-    });
-    this.logger.log(`Emitted course:generation (complete) to ${roomName}`);
+      payload,
+    };
+    this.snapshotService.set(roomName, envelope.payload);
+
+    this.server.to(roomName).emit(eventName, envelope);
+    this.logger.log(`Emitted ${eventName} (complete) to ${roomName}`);
   }
 
   // Emit error notification
   emitCourseError(courseId: string, error: string) {
-    const roomName = `course:${courseId}`;
-    this.server.to(roomName).emit('course:generation', {
+    const roomName = `course:generation:${courseId}`;
+    const eventName = roomName;
+    const payload: ErrorPayload = {
       courseId,
-      status: 'failed',
-      currentStage: 'completed',
-      progress: 0,
-      message: 'Generation failed',
-      errorMessage: error,
+      message: error,
+    };
+
+    const envelope: EventEnvelope<ErrorPayload> = {
+      version: 'v1',
+      event: `${eventName}.error`,
       timestamp: new Date().toISOString(),
-    });
-    this.logger.log(`Emitted course:generation (error) to ${roomName}: ${error}`);
+      payload,
+    };
+    // persist latest error in snapshot
+    this.snapshotService.set(roomName, envelope.payload);
+
+    // Emit error on the composite event name (with .error suffix)
+    this.server.to(roomName).emit(eventName + '.error', envelope);
+    this.logger.log(`Emitted ${eventName}.error to ${roomName}: ${error}`);
   }
 
   // Helper to determine current stage based on progress
-  private determineStage(progress: number): string {
+  private determineStage(progress: number): 'creating' | 'reviewing' | 'refining' | 'completed' {
     if (progress < 40) return 'creating';
     if (progress < 70) return 'reviewing';
     if (progress < 90) return 'refining';
@@ -212,59 +294,148 @@ export class CourseGenerationGateway implements OnGatewayConnection, OnGatewayDi
 
   // Emit module regeneration progress
   emitModuleProgress(courseId: string, moduleId: string, progress: number, message: string) {
-    const roomName = `course:${courseId}`;
-    this.server.to(roomName).emit('module:generation', {
+    const roomName = `module:generation:${moduleId}`;
+    const eventName = roomName;
+    const payload: ModuleGenerationPayload = {
       courseId,
       moduleId,
       status: progress >= 100 ? 'completed' : 'generating',
       currentStage: this.determineStage(progress),
       progress,
       message,
+    };
+
+    const envelope: EventEnvelope<ModuleGenerationPayload> = {
+      version: 'v1',
+      event: eventName,
       timestamp: new Date().toISOString(),
-    });
-    this.logger.log(`Emitted module:generation to ${roomName}: ${progress}% - ${message}`);
+      payload,
+    };
+    this.snapshotService.set(roomName, envelope.payload);
+
+    this.server.to(roomName).emit(eventName, envelope);
+    this.logger.log(`Emitted ${eventName} to ${roomName}: ${progress}% - ${message}`);
   }
 
   // Emit module regeneration completion
   emitModuleComplete(courseId: string, moduleId: string, message: string) {
-    const roomName = `course:${courseId}`;
-    this.server.to(roomName).emit('module:generation', {
+    const roomName = `module:generation:${moduleId}`;
+    const eventName = roomName;
+    const payload: ModuleGenerationPayload = {
       courseId,
       moduleId,
       status: 'completed',
       currentStage: 'completed',
       progress: 100,
       message,
+    };
+
+    const envelope: EventEnvelope<ModuleGenerationPayload> = {
+      version: 'v1',
+      event: eventName,
       timestamp: new Date().toISOString(),
-    });
-    this.logger.log(`Emitted module:generation (complete) to ${roomName}`);
+      payload,
+    };
+    this.snapshotService.set(roomName, envelope.payload);
+
+    this.server.to(roomName).emit(eventName, envelope);
+    this.logger.log(`Emitted ${eventName} (complete) to ${roomName}`);
+  }
+
+  // Emit module regeneration error
+  emitModuleError(courseId: string, moduleId: string, error: string) {
+    const roomName = `module:generation:${moduleId}`;
+    const eventName = roomName;
+    const payload: ErrorPayload = {
+      courseId,
+      moduleId,
+      message: error,
+    };
+
+    const envelope: EventEnvelope<ErrorPayload> = {
+      version: 'v1',
+      event: `${eventName}.error`,
+      timestamp: new Date().toISOString(),
+      payload,
+    };
+    this.snapshotService.set(roomName, envelope.payload);
+
+    this.server.to(roomName).emit(eventName + '.error', envelope);
+    this.logger.log(`Emitted ${eventName}.error to ${roomName}: ${error}`);
   }
 
   // Emit quiz regeneration progress
-  emitQuizProgress(courseId: string, progress: number, message: string) {
-    const roomName = `course:${courseId}`;
-    this.server.to(roomName).emit('quiz:generation', {
+  emitQuizProgress(courseId: string, progress: number, message: string, quizId?: string) {
+    const id = quizId ?? courseId;
+    const roomName = `quiz:generation:${id}`;
+    const eventName = roomName;
+    const payload: QuizGenerationPayload = {
       courseId,
+      quizId: quizId,
       status: progress >= 100 ? 'completed' : 'generating',
       currentStage: this.determineStage(progress),
       progress,
       message,
+    };
+
+    const envelope: EventEnvelope<QuizGenerationPayload> = {
+      version: 'v1',
+      event: eventName,
       timestamp: new Date().toISOString(),
-    });
-    this.logger.log(`Emitted quiz:generation to ${roomName}: ${progress}% - ${message}`);
+      payload,
+    };
+    this.snapshotService.set(roomName, envelope.payload);
+
+    this.server.to(roomName).emit(eventName, envelope);
+    this.logger.log(`Emitted ${eventName} to ${roomName}: ${progress}% - ${message}`);
   }
 
   // Emit quiz regeneration completion
-  emitQuizComplete(courseId: string, message: string) {
-    const roomName = `course:${courseId}`;
-    this.server.to(roomName).emit('quiz:generation', {
+  emitQuizComplete(courseId: string, message: string, quizId?: string) {
+    const id = quizId ?? courseId;
+    const roomName = `quiz:generation:${id}`;
+    const eventName = roomName;
+    const payload: QuizGenerationPayload = {
       courseId,
+      quizId: quizId,
       status: 'completed',
       currentStage: 'completed',
       progress: 100,
       message,
+    };
+
+    const envelope: EventEnvelope<QuizGenerationPayload> = {
+      version: 'v1',
+      event: eventName,
       timestamp: new Date().toISOString(),
-    });
-    this.logger.log(`Emitted quiz:generation (complete) to ${roomName}`);
+      payload,
+    };
+    this.snapshotService.set(roomName, envelope.payload);
+
+    this.server.to(roomName).emit(eventName, envelope);
+    this.logger.log(`Emitted ${eventName} (complete) to ${roomName}`);
+  }
+
+  // Emit quiz regeneration error
+  emitQuizError(courseId: string, error: string, quizId?: string) {
+    const id = quizId ?? courseId;
+    const roomName = `quiz:generation:${id}`;
+    const eventName = roomName;
+    const payload: ErrorPayload = {
+      courseId,
+      quizId: quizId,
+      message: error,
+    };
+
+    const envelope: EventEnvelope<ErrorPayload> = {
+      version: 'v1',
+      event: `${eventName}.error`,
+      timestamp: new Date().toISOString(),
+      payload,
+    };
+    this.snapshotService.set(roomName, envelope.payload);
+
+    this.server.to(roomName).emit(eventName + '.error', envelope);
+    this.logger.log(`Emitted ${eventName}.error to ${roomName}: ${error}`);
   }
 }

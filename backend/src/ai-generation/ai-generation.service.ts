@@ -345,7 +345,7 @@ export class AiGenerationService {
     } catch (error) {
       const message = this.extractErrorMessage(error);
       this.logger.error(`Module regeneration failed for module ${moduleId}: ${message}`);
-      this.gateway.emitCourseError(courseId, `Module regeneration failed: ${message}`);
+      this.gateway.emitModuleError(courseId, moduleId, `Module regeneration failed: ${message}`);
     }
   }
 
@@ -431,7 +431,7 @@ export class AiGenerationService {
         }
       }
 
-      this.gateway.emitQuizComplete(courseId, 'Quiz regeneration completed successfully!');
+      this.gateway.emitQuizComplete(courseId, 'Quiz regeneration completed successfully!', quiz.id);
 
       this.logger.log(`Quiz regeneration completed successfully for course ${courseId}`);
     } catch (error) {

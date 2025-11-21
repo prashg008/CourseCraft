@@ -2,6 +2,12 @@ import { Module } from '@nestjs/common';
 import { JwtModule } from '@nestjs/jwt';
 import { ConfigModule, ConfigService } from '@nestjs/config';
 import { CourseGenerationGateway } from './course-generation.gateway';
+import { GenerationSnapshotService } from './snapshot.service';
+import { EventsModule } from '../common/events/events.module';
+import { SnapshotController } from './snapshot.controller';
+import { TestController } from './test.controller';
+import { forwardRef } from '@nestjs/common';
+import { CoursesModule } from '../courses/courses.module';
 
 @Module({
   imports: [
@@ -15,8 +21,11 @@ import { CourseGenerationGateway } from './course-generation.gateway';
         },
       }),
     }),
+    EventsModule,
+    forwardRef(() => CoursesModule),
   ],
-  providers: [CourseGenerationGateway],
-  exports: [CourseGenerationGateway],
+  controllers: [SnapshotController, TestController],
+  providers: [CourseGenerationGateway, GenerationSnapshotService],
+  exports: [CourseGenerationGateway, GenerationSnapshotService],
 })
 export class WebsocketModule {}
