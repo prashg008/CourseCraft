@@ -45,8 +45,7 @@ export class OrchestratorService {
         } else {
           // Subsequent attempts - revise based on feedback
           const review = await this.reviewerAgent.reviewContent(currentContent, originalPrompt);
-          // eslint-disable-next-line @typescript-eslint/no-unused-expressions
-          onReviewStarted && onReviewStarted();
+          if (typeof onReviewStarted === 'function') onReviewStarted();
           currentContent = await this.reviewerAgent.reviseContent(
             currentContent,
             review.qualityScore,
@@ -76,13 +75,12 @@ export class OrchestratorService {
         }
 
         this.logger.log(`Quality below threshold, attempting revision...`);
-      } catch (error: any) {
-        this.logger.error(`Attempt ${attempt} failed: ${error.message}`);
+      } catch (error) {
+        const msg = error instanceof Error ? error.message : String(error);
+        this.logger.error(`Attempt ${attempt} failed: ${msg}`);
 
         if (attempt === MAX_ATTEMPTS) {
-          throw new Error(
-            `Course generation failed after ${MAX_ATTEMPTS} attempts: ${error.message}`,
-          );
+          throw new Error(`Course generation failed after ${MAX_ATTEMPTS} attempts: ${msg}`);
         }
       }
     }
@@ -157,13 +155,12 @@ export class OrchestratorService {
         }
 
         this.logger.log(`Quality below threshold, attempting revision...`);
-      } catch (error: any) {
-        this.logger.error(`Attempt ${attempt} failed: ${error.message}`);
+      } catch (error) {
+        const msg = error instanceof Error ? error.message : String(error);
+        this.logger.error(`Attempt ${attempt} failed: ${msg}`);
 
         if (attempt === MAX_ATTEMPTS) {
-          throw new Error(
-            `Module generation failed after ${MAX_ATTEMPTS} attempts: ${error.message}`,
-          );
+          throw new Error(`Module generation failed after ${MAX_ATTEMPTS} attempts: ${msg}`);
         }
       }
     }
@@ -220,13 +217,12 @@ export class OrchestratorService {
         }
 
         this.logger.log(`Quality below threshold, attempting revision...`);
-      } catch (error: any) {
-        this.logger.error(`Attempt ${attempt} failed: ${error.message}`);
+      } catch (error) {
+        const msg = error instanceof Error ? error.message : String(error);
+        this.logger.error(`Attempt ${attempt} failed: ${msg}`);
 
         if (attempt === MAX_ATTEMPTS) {
-          throw new Error(
-            `Quiz generation failed after ${MAX_ATTEMPTS} attempts: ${error.message}`,
-          );
+          throw new Error(`Quiz generation failed after ${MAX_ATTEMPTS} attempts: ${msg}`);
         }
       }
     }

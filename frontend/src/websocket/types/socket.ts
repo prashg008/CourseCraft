@@ -1,19 +1,11 @@
 import type { Socket } from 'socket.io-client';
-import type {
-  CourseGenerationPayload,
-  ModuleGenerationPayload,
-  QuizGenerationPayload,
-  CourseUpdatePayload,
-  SubscriptionData,
-  SubscriptionResponse,
-} from './events';
+import type { SubscriptionData, SubscriptionResponse } from './events';
+import type { EventEnvelope } from '../contracts/events';
 
 // Define the event map for type safety
 export interface ServerToClientEvents {
-  'course:generation': (data: CourseGenerationPayload) => void;
-  'module:generation': (data: ModuleGenerationPayload) => void;
-  'quiz:generation': (data: QuizGenerationPayload) => void;
-  'course:update': (data: CourseUpdatePayload) => void;
+  // Dynamic composite event keys like 'course:generation:{id}', 'module:generation:{id}', etc.
+  [event: string]: (data: EventEnvelope<unknown>) => void;
 }
 
 export interface ClientToServerEvents {

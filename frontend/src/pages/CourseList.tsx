@@ -32,33 +32,32 @@ function CourseList() {
   // Debounced search query to prevent excessive API calls
   const debouncedSearch = useDebounce(search, 500);
 
-  // Fetch courses
-  const fetchCourses = async () => {
-    setLoading(true);
-    try {
-      const filters: CourseFilters = {
-        search: debouncedSearch || undefined,
-        status: statusFilter,
-        sortBy,
-        sortOrder,
-        page: currentPage,
-        pageSize,
-      };
-
-      const response = await coursesApi.getAll(filters);
-      setCourses(response.data);
-      setTotalPages(response.totalPages);
-      setTotal(response.total);
-    } catch (error) {
-      showError(error instanceof Error ? error.message : 'Failed to load courses');
-    } finally {
-      setLoading(false);
-    }
-  };
-
   // Fetch on mount and when filters change (using debounced search)
   useEffect(() => {
-    fetchCourses();
+    const fetchCourses = async () => {
+      setLoading(true);
+      try {
+        const filters: CourseFilters = {
+          search: debouncedSearch || undefined,
+          status: statusFilter,
+          sortBy,
+          sortOrder,
+          page: currentPage,
+          pageSize,
+        };
+
+        const response = await coursesApi.getAll(filters);
+        setCourses(response.data);
+        setTotalPages(response.totalPages);
+        setTotal(response.total);
+      } catch (error) {
+        showError(error instanceof Error ? error.message : 'Failed to load courses');
+      } finally {
+        setLoading(false);
+      }
+    };
+
+    void fetchCourses();
   }, [debouncedSearch, statusFilter, sortBy, sortOrder, currentPage]);
 
   // Reset to page 1 when filters change (using debounced search)
@@ -66,7 +65,7 @@ function CourseList() {
     if (currentPage !== 1) {
       setCurrentPage(1);
     }
-  }, [debouncedSearch, statusFilter, sortBy, sortOrder]);
+  }, [debouncedSearch, statusFilter, sortBy, sortOrder, currentPage]);
 
   // Get status badge variant
   const getStatusVariant = (status: CourseStatus) => {

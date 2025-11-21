@@ -1,5 +1,4 @@
 import { useEffect, useState, useCallback } from 'react';
-import type { TypedSocket } from '../types/socket';
 import { useSocket } from './useSocket';
 
 export interface SubscriptionOptions {
@@ -24,7 +23,7 @@ export function useSocketSubscription<T = unknown>(
   options: SubscriptionOptions = {}
 ) {
   const { autoSubscribe = true } = options;
-  const { socket, state: socketState } = useSocket();
+  const { socket, state: socketState, registerSubscription, unregisterSubscription } = useSocket();
 
   const [state, setState] = useState<SubscriptionState<T>>({
     data: null,
@@ -41,6 +40,7 @@ export function useSocketSubscription<T = unknown>(
         loading: false,
         error: new Error('Socket not connected'),
       }));
+      console.warn('[SocketSubscription] Socket not connected');
       return;
     }
 
@@ -51,16 +51,27 @@ export function useSocketSubscription<T = unknown>(
         loading: false,
         error: new Error('Identifier is required to subscribe'),
       }));
+      console.warn('[SocketSubscription] Identifier is required to subscribe');
       return;
     }
 
     setState(prev => ({ ...prev, loading: true, error: null }));
+    console.log('[SocketSubscription] Subscribing to event:', event, 'id:', identifier);
 
     // Send subscribe message to server
     socket.emit('subscribe', { event, id: identifier }, response => {
+      console.log('[SocketSubscription] Subscribe response:', response);
       if (response.success) {
         setIsSubscribed(true);
         setState(prev => ({ ...prev, loading: false }));
+        // Register successful subscription for auto-resubscribe
+        if (registerSubscription) {
+          try {
+            registerSubscription(event, identifier as string);
+          } catch (e) {
+            console.warn('registerSubscription failed', e);
+          }
+        }
       } else {
         setState(prev => ({
           ...prev,
@@ -69,7 +80,7 @@ export function useSocketSubscription<T = unknown>(
         }));
       }
     });
-  }, [socket, socketState.connected, event, identifier]);
+  }, [socket, socketState.connected, event, identifier, registerSubscription]);
 
   const unsubscribe = useCallback(() => {
     if (!socket) return;
@@ -78,17 +89,23 @@ export function useSocketSubscription<T = unknown>(
       if (response.success) {
         setIsSubscribed(false);
         setState({ data: null, loading: false, error: null });
+        if (unregisterSubscription) {
+          try {
+            unregisterSubscription(event, identifier as string);
+          } catch (e) {
+            console.warn('unregisterSubscription failed', e);
+          }
+        }
       }
     });
-  }, [socket, event, identifier]);
+  }, [socket, event, identifier, unregisterSubscription]);
 
   // Listen for events
   useEffect(() => {
     if (!socket || !isSubscribed) return;
 
-    type SocketEvent = Parameters<TypedSocket['on']>[0];
-    type SocketHandler = Parameters<TypedSocket['on']>[1];
-    const socketEvent = event as SocketEvent;
+    // Composite event name (e.g., 'course:generation:{id}')
+    const compositeEvent = `${event}:${identifier}`;
 
     const handleEvent = (data: T) => {
       setState(prev => ({
@@ -98,15 +115,21 @@ export function useSocketSubscription<T = unknown>(
         error: null,
       }));
     };
-    const socketHandler = handleEvent as SocketHandler;
 
-    // Listen on the full event key
-    socket.on(socketEvent, socketHandler);
+    // Use a typed emitter for dynamic event keys
+    const s = socket as unknown as {
+      on: (event: string, handler: (data: T) => void) => void;
+      off: (event: string, handler: (data: T) => void) => void;
+    } | null;
+
+    if (!s) return () => {};
+
+    s.on(compositeEvent, handleEvent);
 
     return () => {
-      socket.off(socketEvent, socketHandler);
+      s.off(compositeEvent, handleEvent);
     };
-  }, [socket, event, isSubscribed]);
+  }, [socket, event, identifier, isSubscribed]);
 
   // Auto-subscribe if enabled
   useEffect(() => {

@@ -18,7 +18,7 @@ export function QuestionForm({ question, onSubmit, onCancel, loading = false }: 
   const [formData, setFormData] = useState<QuestionFormData>({
     text: question?.text || '',
     type: question?.type || 'single_choice',
-    answers: question?.answers.map((a) => ({ text: a.text, isCorrect: a.isCorrect })) || [
+    answers: question?.answers.map(a => ({ text: a.text, isCorrect: a.isCorrect })) || [
       { text: '', isCorrect: true },
       { text: '', isCorrect: false },
     ],
@@ -28,11 +28,14 @@ export function QuestionForm({ question, onSubmit, onCancel, loading = false }: 
   // Update form when question prop changes
   useEffect(() => {
     if (question) {
-      setFormData({
-        text: question.text,
-        type: question.type,
-        answers: question.answers.map((a) => ({ text: a.text, isCorrect: a.isCorrect })),
-      });
+      // Defer the update to avoid synchronous setState inside effect
+      Promise.resolve().then(() =>
+        setFormData({
+          text: question.text,
+          type: question.type,
+          answers: question.answers.map(a => ({ text: a.text, isCorrect: a.isCorrect })),
+        })
+      );
     }
   }, [question]);
 
@@ -43,12 +46,12 @@ export function QuestionForm({ question, onSubmit, onCancel, loading = false }: 
       newErrors.text = 'Question text is required';
     }
 
-    const nonEmptyAnswers = formData.answers.filter((a) => a.text.trim());
+    const nonEmptyAnswers = formData.answers.filter(a => a.text.trim());
     if (nonEmptyAnswers.length < 2) {
       newErrors.answers = 'At least 2 answers are required';
     }
 
-    const hasCorrectAnswer = formData.answers.some((a) => a.isCorrect && a.text.trim());
+    const hasCorrectAnswer = formData.answers.some(a => a.isCorrect && a.text.trim());
     if (!hasCorrectAnswer) {
       newErrors.answers = 'At least one answer must be marked as correct';
     }
@@ -67,14 +70,18 @@ export function QuestionForm({ question, onSubmit, onCancel, loading = false }: 
     // Filter out empty answers
     const cleanedData: QuestionFormData = {
       ...formData,
-      answers: formData.answers.filter((a) => a.text.trim()),
+      answers: formData.answers.filter(a => a.text.trim()),
     };
 
     await onSubmit(cleanedData);
   };
 
-  const handleAnswerChange = (index: number, field: 'text' | 'isCorrect', value: string | boolean) => {
-    setFormData((prev) => {
+  const handleAnswerChange = (
+    index: number,
+    field: 'text' | 'isCorrect',
+    value: string | boolean
+  ) => {
+    setFormData(prev => {
       const newAnswers = [...prev.answers];
       if (field === 'text') {
         newAnswers[index].text = value as string;
@@ -94,12 +101,12 @@ export function QuestionForm({ question, onSubmit, onCancel, loading = false }: 
 
     // Clear errors
     if (errors.answers) {
-      setErrors((prev) => ({ ...prev, answers: undefined }));
+      setErrors(prev => ({ ...prev, answers: undefined }));
     }
   };
 
   const addAnswer = () => {
-    setFormData((prev) => ({
+    setFormData(prev => ({
       ...prev,
       answers: [...prev.answers, { text: '', isCorrect: false }],
     }));
@@ -107,7 +114,7 @@ export function QuestionForm({ question, onSubmit, onCancel, loading = false }: 
 
   const removeAnswer = (index: number) => {
     if (formData.answers.length <= 2) return; // Minimum 2 answers
-    setFormData((prev) => ({
+    setFormData(prev => ({
       ...prev,
       answers: prev.answers.filter((_, i) => i !== index),
     }));
@@ -120,7 +127,7 @@ export function QuestionForm({ question, onSubmit, onCancel, loading = false }: 
         <label className="block text-sm font-medium text-gray-700 mb-2">Question Type</label>
         <select
           value={formData.type}
-          onChange={(e) => setFormData((prev) => ({ ...prev, type: e.target.value as QuestionType }))}
+          onChange={e => setFormData(prev => ({ ...prev, type: e.target.value as QuestionType }))}
           disabled={loading || !!question} // Can't change type when editing
           className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-primary-500 focus:border-primary-500 disabled:bg-gray-100 disabled:cursor-not-allowed"
         >
@@ -138,9 +145,9 @@ export function QuestionForm({ question, onSubmit, onCancel, loading = false }: 
         variant="textarea"
         name="text"
         value={formData.text}
-        onChange={(e) => {
-          setFormData((prev) => ({ ...prev, text: e.target.value }));
-          if (errors.text) setErrors((prev) => ({ ...prev, text: undefined }));
+        onChange={e => {
+          setFormData(prev => ({ ...prev, text: e.target.value }));
+          if (errors.text) setErrors(prev => ({ ...prev, text: undefined }));
         }}
         error={errors.text}
         placeholder="Enter your question..."
@@ -152,8 +159,13 @@ export function QuestionForm({ question, onSubmit, onCancel, loading = false }: 
       {/* Answers */}
       <div>
         <label className="block text-sm font-medium text-gray-700 mb-2">
-          Answers {formData.type === 'single_choice' && <span className="text-xs text-gray-500">(select one correct answer)</span>}
-          {formData.type === 'mcq' && <span className="text-xs text-gray-500">(select all correct answers)</span>}
+          Answers{' '}
+          {formData.type === 'single_choice' && (
+            <span className="text-xs text-gray-500">(select one correct answer)</span>
+          )}
+          {formData.type === 'mcq' && (
+            <span className="text-xs text-gray-500">(select all correct answers)</span>
+          )}
         </label>
 
         <div className="space-y-3">
@@ -164,7 +176,7 @@ export function QuestionForm({ question, onSubmit, onCancel, loading = false }: 
                   type={formData.type === 'mcq' ? 'checkbox' : 'radio'}
                   name="correctAnswer"
                   checked={answer.isCorrect}
-                  onChange={(e) => handleAnswerChange(index, 'isCorrect', e.target.checked)}
+                  onChange={e => handleAnswerChange(index, 'isCorrect', e.target.checked)}
                   disabled={loading}
                   className="h-4 w-4 text-primary-600 focus:ring-primary-500 border-gray-300 rounded"
                 />
@@ -172,7 +184,7 @@ export function QuestionForm({ question, onSubmit, onCancel, loading = false }: 
               <Input
                 type="text"
                 value={answer.text}
-                onChange={(e) => handleAnswerChange(index, 'text', e.target.value)}
+                onChange={e => handleAnswerChange(index, 'text', e.target.value)}
                 placeholder={`Answer ${index + 1}`}
                 disabled={loading}
                 className="flex-1"

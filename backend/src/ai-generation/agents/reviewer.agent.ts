@@ -19,7 +19,7 @@ export class ReviewerAgent {
 
   constructor(private readonly llmFactory: LLMFactoryService) {}
 
-  async reviewContent(content: any, originalPrompt: string): Promise<ReviewOutput> {
+  async reviewContent(content: unknown, originalPrompt: string): Promise<ReviewOutput> {
     this.logger.log('Reviewing generated content');
 
     const llm = this.llmFactory.createLLM({ temperature: 0.3, streaming: false });
@@ -34,9 +34,10 @@ export class ReviewerAgent {
       );
 
       return result as ReviewOutput;
-    } catch (error: any) {
-      this.logger.error(`Failed to review content: ${error.message}`);
-      throw new Error(`Content review failed: ${error.message}`);
+    } catch (error) {
+      const msg = error instanceof Error ? error.message : String(error);
+      this.logger.error(`Failed to review content: ${msg}`);
+      throw new Error(`Content review failed: ${msg}`);
     }
   }
 
@@ -63,9 +64,10 @@ export class ReviewerAgent {
 
       this.logger.log('Content revision complete');
       return result as T;
-    } catch (error: any) {
-      this.logger.error(`Failed to revise content: ${error.message}`);
-      throw new Error(`Content revision failed: ${error.message}`);
+    } catch (error) {
+      const msg = error instanceof Error ? error.message : String(error);
+      this.logger.error(`Failed to revise content: ${msg}`);
+      throw new Error(`Content revision failed: ${msg}`);
     }
   }
 }

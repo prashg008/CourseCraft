@@ -28,12 +28,13 @@ export class LLMFactoryService {
     const apiKey = this.configService.get<string>('llm.apiKey');
 
     if (!apiKey) {
+      const envVar = provider === 'openai' ? 'OPENAI_API_KEY' : 'GEMINI_API_KEY';
       throw new Error(
-        `API key not configured for ${provider}. Please set ${provider === 'openai' ? 'OPENAI_API_KEY' : 'GEMINI_API_KEY'} in your environment.`,
+        `API key not configured for ${provider}. Please set ${envVar} in your environment.`,
       );
     }
 
-    this.logger.log(`Creating LLM instance: provider=${provider}, model=${modelName}`);
+    this.logger.log(`Creating LLM instance: provider=${provider}, model=${modelName ?? 'unknown'}`);
 
     switch (provider) {
       case 'openai':
@@ -53,9 +54,7 @@ export class LLMFactoryService {
         });
 
       default:
-        throw new Error(
-          `Unsupported LLM provider: ${provider}. Supported providers: openai, gemini`,
-        );
+        throw new Error('Unsupported LLM provider. Supported providers: openai, gemini');
     }
   }
 

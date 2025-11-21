@@ -23,7 +23,21 @@ export function createSocket(options: SocketOptions): TypedSocket {
 
   // Get JWT token from localStorage
   const getToken = (): string | null => {
-    return localStorage.getItem('authToken');
+    const token = localStorage.getItem('authToken');
+    if (!token) {
+      console.warn(
+        '[Socket] No authToken found in localStorage when attempting to connect WebSocket.'
+      );
+    } else {
+      // Debug: decode JWT and log payload
+      try {
+        const payload = JSON.parse(atob(token.split('.')[1]));
+        console.log('[Socket] JWT payload:', payload);
+      } catch (e) {
+        console.warn('[Socket] Could not decode JWT:', e);
+      }
+    }
+    return token;
   };
 
   // Construct full URL with namespace
@@ -34,20 +48,28 @@ export function createSocket(options: SocketOptions): TypedSocket {
     reconnectionAttempts,
     reconnectionDelay,
     reconnectionDelayMax: 5000,
-    auth: (cb) => {
+    auth: cb => {
       const token = getToken();
+      console.log('[Socket] Authenticating with token:', token);
       cb({
         token: token || '',
       });
     },
   });
 
-  // Re-authenticate on reconnection
+  // Debug connection events
   socket.on('connect', () => {
     const token = getToken();
+    console.log('[Socket] Connected! Socket ID:', socket.id);
     if (token && socket.auth) {
       socket.auth = { token };
     }
+  });
+  socket.on('disconnect', reason => {
+    console.warn('[Socket] Disconnected:', reason);
+  });
+  socket.on('connect_error', err => {
+    console.error('[Socket] Connection error:', err);
   });
 
   return socket;

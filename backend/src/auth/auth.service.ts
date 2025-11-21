@@ -27,7 +27,10 @@ export class AuthService {
     const user = await this.usersService.create(registerDto);
 
     // Generate JWT token
-    const payload: UserPayload = {
+
+    // Standard JWT: include 'sub' as subject (user id)
+    const payload = {
+      sub: user.id,
       id: user.id,
       email: user.email,
       username: user.username,
@@ -45,8 +48,10 @@ export class AuthService {
     };
   }
 
-  async login(user: UserPayload) {
-    const payload: UserPayload = {
+  login(user: UserPayload) {
+    // Standard JWT: include 'sub' as subject (user id)
+    const payload = {
+      sub: user.id,
       id: user.id,
       email: user.email,
       username: user.username,

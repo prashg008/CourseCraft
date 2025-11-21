@@ -1,6 +1,6 @@
 import { BrowserRouter, Routes, Route, Navigate } from 'react-router-dom';
 import { Toaster } from 'react-hot-toast';
-import { AuthProvider } from '@/context/AuthContext';
+import { AuthProvider, useAuth } from '@/context/AuthContext';
 import { SocketProvider } from '@/websocket';
 import { ProtectedRoute, GuestRoute } from '@/components/auth';
 import Login from '@/pages/Login';
@@ -11,10 +11,25 @@ import CourseDetail from '@/pages/CourseDetail';
 import { WS_BASE_URL } from '@/services/api';
 
 function App() {
+  // Custom wrapper to access auth context and pass to SocketProvider
+  function Providers({ children }: { children: React.ReactNode }) {
+    const { isAuthenticated, isLoading } = useAuth();
+    return (
+      <SocketProvider
+        url={WS_BASE_URL}
+        namespace="/ws"
+        autoConnect={true}
+        isAuthenticated={isAuthenticated}
+        isLoading={isLoading}
+      >
+        {children}
+      </SocketProvider>
+    );
+  }
   return (
     <BrowserRouter>
       <AuthProvider>
-        <SocketProvider url={WS_BASE_URL} namespace="/ws" autoConnect={true}>
+        <Providers>
           <Toaster />
           <Routes>
             <Route
@@ -59,7 +74,7 @@ function App() {
             />
             <Route path="*" element={<Navigate to="/" replace />} />
           </Routes>
-        </SocketProvider>
+        </Providers>
       </AuthProvider>
     </BrowserRouter>
   );

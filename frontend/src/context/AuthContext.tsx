@@ -1,3 +1,4 @@
+/* eslint-disable react-refresh/only-export-components */
 import { createContext, useContext, useState, useEffect } from 'react';
 import type { ReactNode } from 'react';
 import type { User } from '@/types';
@@ -56,7 +57,7 @@ export function AuthProvider({ children }: AuthProviderProps) {
             setToken(null);
             setUser(null);
           }
-        } catch (error) {
+        } catch {
           // Token is invalid or expired, clear storage
           console.log('Token validation failed, logging out');
           localStorage.removeItem('authToken');

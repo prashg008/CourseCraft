@@ -6,17 +6,18 @@ import {
   ValidationError,
 } from '@nestjs/common';
 import { validate } from 'class-validator';
-import { plainToInstance } from 'class-transformer';
+import { plainToInstance, type ClassConstructor } from 'class-transformer';
 
 @Injectable()
 export class ValidationPipe implements PipeTransform<unknown> {
-  async transform(value: unknown, { metatype }: ArgumentMetadata) {
+  async transform(value: unknown, { metatype }: ArgumentMetadata): Promise<unknown> {
     if (!metatype || !this.toValidate(metatype)) {
       return value;
     }
 
-    const object = plainToInstance(metatype, value);
-    const errors = await validate(object);
+    const ctor = metatype as unknown as ClassConstructor<unknown>;
+    const object = plainToInstance(ctor, value as object);
+    const errors = await validate(object as object);
 
     if (errors.length > 0) {
       const messages = this.formatErrors(errors);
@@ -29,9 +30,9 @@ export class ValidationPipe implements PipeTransform<unknown> {
     return object;
   }
 
-  private toValidate(metatype: Function): boolean {
-    const types: Function[] = [String, Boolean, Number, Array, Object];
-    return !types.includes(metatype);
+  private toValidate(metatype: unknown): boolean {
+    const types = [String, Boolean, Number, Array, Object];
+    return typeof metatype === 'function' && !types.includes(metatype as any);
   }
 
   private formatErrors(errors: ValidationError[]): string[] {

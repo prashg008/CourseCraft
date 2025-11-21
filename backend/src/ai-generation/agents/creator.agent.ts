@@ -27,9 +27,10 @@ export class CreatorAgent {
 
       this.logger.log(`Successfully generated course with ${result.modules.length} modules`);
       return result as CourseOutput;
-    } catch (error: any) {
-      this.logger.error(`Failed to generate full course: ${error.message}`);
-      throw new Error(`Course generation failed: ${error.message}`);
+    } catch (error) {
+      const msg = error instanceof Error ? error.message : String(error);
+      this.logger.error(`Failed to generate full course: ${msg}`);
+      throw new Error(`Course generation failed: ${msg}`);
     }
   }
 
@@ -63,9 +64,10 @@ export class CreatorAgent {
 
       this.logger.log(`Successfully generated module with ${result.lessons.length} lessons`);
       return result as ModuleOutput;
-    } catch (error: any) {
-      this.logger.error(`Failed to generate module: ${error.message}`);
-      throw new Error(`Module generation failed: ${error.message}`);
+    } catch (error) {
+      const msg = error instanceof Error ? error.message : String(error);
+      this.logger.error(`Failed to generate module: ${msg}`);
+      throw new Error(`Module generation failed: ${msg}`);
     }
   }
 
@@ -81,9 +83,10 @@ export class CreatorAgent {
 
       this.logger.log(`Successfully generated quiz with ${result.questions.length} questions`);
       return result as QuizOutput;
-    } catch (error: any) {
-      this.logger.error(`Failed to generate quiz: ${error.message}`);
-      throw new Error(`Quiz generation failed: ${error.message}`);
+    } catch (error) {
+      const msg = error instanceof Error ? error.message : String(error);
+      this.logger.error(`Failed to generate quiz: ${msg}`);
+      throw new Error(`Quiz generation failed: ${msg}`);
     }
   }
 }

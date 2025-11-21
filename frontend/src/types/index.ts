@@ -1,3 +1,18 @@
+// Minimal interfaces for API response shapes
+export interface MessageResponse {
+  message?: string;
+}
+
+export interface SuccessDataResponse<T> {
+  success: boolean;
+  data: T;
+  message?: string;
+}
+
+export interface CountResultsResponse<T> {
+  count: number;
+  results: T[];
+}
 // User types
 export interface User {
   id: string;
