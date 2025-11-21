@@ -40,6 +40,7 @@ export function useSocketSubscription<T = unknown>(
         loading: false,
         error: new Error('Socket not connected'),
       }));
+      console.warn('[SocketSubscription] Socket not connected');
       return;
     }
 
@@ -50,13 +51,16 @@ export function useSocketSubscription<T = unknown>(
         loading: false,
         error: new Error('Identifier is required to subscribe'),
       }));
+      console.warn('[SocketSubscription] Identifier is required to subscribe');
       return;
     }
 
     setState(prev => ({ ...prev, loading: true, error: null }));
+    console.log('[SocketSubscription] Subscribing to event:', event, 'id:', identifier);
 
     // Send subscribe message to server
     socket.emit('subscribe', { event, id: identifier }, response => {
+      console.log('[SocketSubscription] Subscribe response:', response);
       if (response.success) {
         setIsSubscribed(true);
         setState(prev => ({ ...prev, loading: false }));
