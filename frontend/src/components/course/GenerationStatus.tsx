@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { Badge, Button, Card, CardBody, LoadingSpinner, ConfirmDialog } from '@/components/ui';
 import { useAuth } from '@/context/AuthContext';
-import { useWebSocket } from '@/hooks/useWebSocket';
+import { useCourseGeneration } from '@/websocket';
 import { aiApi } from '@/services/api';
 import { showError, showSuccess } from '@/utils/toast';
 import type { GenerationStage, GenerationStatus as StatusLabel, GenerationTask } from '@/types';
@@ -31,27 +31,15 @@ export function GenerationStatus({ courseId, onComplete, onRegenerate }: Generat
   const { token } = useAuth();
   const completionNotifiedRef = useRef(false);
   const [isRegenerating, setIsRegenerating] = useState(false);
-  const [wsEnabled, setWsEnabled] = useState(true);
   const [showConfirm, setShowConfirm] = useState(false);
 
-  const { latestMessage, status, reconnecting, error, reconnectAttempts } =
-    useWebSocket<GenerationTask>({
-      courseId,
-      token,
-      enabled: wsEnabled && Boolean(courseId && token),
-      retryLimit: -1,
-      onClose: event => {
-        if (event.code === 4404) {
-          console.warn('No generation task found for course yet. Will retry when available.');
-        }
-      },
-    });
+  const { data: latestMessage, loading, error } = useCourseGeneration(courseId);
 
   const progress = latestMessage?.progress ?? 0;
   const stage = latestMessage?.currentStage ?? 'creating';
   const statusLabel = latestMessage?.status ?? 'running';
-  const message = latestMessage?.message ?? 'Our AI is preparing your course content.';
   const errorMessage = latestMessage?.errorMessage;
+  const message = latestMessage?.message ?? 'Generating course content...';
 
   useEffect(() => {
     if (!latestMessage || latestMessage.status !== 'completed') {
@@ -60,15 +48,9 @@ export function GenerationStatus({ courseId, onComplete, onRegenerate }: Generat
 
     if (!completionNotifiedRef.current) {
       completionNotifiedRef.current = true;
-      onComplete?.(latestMessage);
+      onComplete?.(latestMessage as unknown as GenerationTask);
     }
   }, [latestMessage, onComplete]);
-
-  useEffect(() => {
-    if (status === 'open') {
-      completionNotifiedRef.current = false;
-    }
-  }, [status]);
 
   const stageDescription = useMemo(
     () => stageCopy[stage as GenerationStage] ?? stageCopy.creating,
@@ -83,25 +65,14 @@ export function GenerationStatus({ courseId, onComplete, onRegenerate }: Generat
     setIsRegenerating(true);
 
     try {
-      // Disconnect WebSocket before regeneration
-      setWsEnabled(false);
-
       // Start course regeneration
       await aiApi.generateCourse(courseId);
       showSuccess('Course regeneration started! You can monitor the progress below.');
 
       // Refresh course data
       onRegenerate?.();
-
-      // Small delay to ensure backend has created the new task
-      await new Promise(resolve => setTimeout(resolve, 500));
-
-      // Reconnect WebSocket to pick up the new generation task
-      setWsEnabled(true);
     } catch (error) {
       showError(error instanceof Error ? error.message : 'Failed to start course regeneration');
-      // Re-enable WebSocket even on error
-      setWsEnabled(true);
     } finally {
       setIsRegenerating(false);
     }
@@ -270,7 +241,9 @@ export function GenerationStatus({ courseId, onComplete, onRegenerate }: Generat
                 <p className="font-semibold text-gray-900">Course generation in progress</p>
                 <Badge variant={statusVariantMap[statusLabel]}>{statusLabel}</Badge>
               </div>
-              <p className="mt-1 text-sm text-gray-600">{message}</p>
+              <p className="mt-1 text-sm text-gray-600">
+                {latestMessage ? stageDescription : 'Our AI is preparing your course content.'}
+              </p>
               <div className="mt-4">
                 <div className="flex items-center justify-between text-sm text-gray-600">
                   <span>{stageDescription}</span>
@@ -283,13 +256,12 @@ export function GenerationStatus({ courseId, onComplete, onRegenerate }: Generat
                   />
                 </div>
               </div>
-              {(reconnecting || error) && (
+              {error && (
                 <div className="mt-3 text-xs text-gray-500">
-                  {reconnecting && <p>Reconnecting to updates… (attempt {reconnectAttempts})</p>}
-                  {error && <p className="text-red-600">{error}</p>}
+                  <p className="text-red-600">{error.message}</p>
                 </div>
               )}
-              {status === 'closed' && !reconnecting && !latestMessage && (
+              {loading && !latestMessage && (
                 <p className="mt-3 text-xs text-gray-400">
                   Waiting for the generation task to start…
                 </p>

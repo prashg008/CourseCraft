@@ -1,338 +1,159 @@
 # CourseCraft
 
-CourseCraft is a full-stack course generation platform that lets instructors describe the course they want and get AI-generated modules, lessons, and quizzes. The backend orchestrates a Creator/Reviewer LLM workflow via Celery tasks and streams real-time progress over WebSockets, while the React frontend offers a modern authoring experience with editing, publishing, and regeneration tools.
+CourseCraft is an AI-assisted course authoring platform. The backend is built with NestJS, TypeORM, LangChain, and PostgreSQL; the frontend is a React + Vite SPA styled with Tailwind. This repository now ships with production-ready Docker images plus a `docker-compose.yml` that ties the stack together.
 
-## Features
+## Highlights
 
-- AI-powered course, module, and quiz generation using a Creator/Reviewer pattern with optional revision passes
-- Manual course management: CRUD for courses, modules, lessons, and quiz questions with draft/published workflows
-- Real-time status updates over Django Channels WebSockets for long-running generation jobs
-- Token-based authentication with protected routes on the frontend and Axios interceptors for automatic token handling
-- Pagination, filtering, sorting, and search across the course catalog plus regeneration flows with user feedback
+- AI-powered creator/reviewer pipeline for generating modules, lessons, and quizzes
+- Manual editing workflows with pagination, filtering, and publishing states
+- JWT authentication with Axios interceptors and guarded NestJS routes
+- Real-time websocket updates for long-running generation tasks
+- Single command Docker workflow for local development or demos
 
 ## Tech Stack
 
-- **Backend**: Django 5, Django REST Framework, Celery, Django Channels, LangChain, PostgreSQL, Redis
-- **Frontend**: React 19 + TypeScript, Vite, Tailwind CSS, React Router, Axios
-- **Tooling**: Poetry for Python dependency management, npm/vite for the frontend, Redis for Celery + Channels
+- **Backend**: NestJS 11, TypeORM, PostgreSQL, LangChain, Passport JWT, Socket.IO
+- **Frontend**: React 19, Vite 7, TypeScript, Tailwind CSS, React Router
+- **Infra**: Node 20, Docker, Docker Compose, Postgres 16
 
-## Repository Layout
+## Project Layout
 
 ```
 CourseCraft/
-├── backend/      # Django project (`config`, `courses`, `users`, `ai_generation` apps)
-├── frontend/     # React SPA built with Vite and Tailwind CSS
-├── README.md     # This file
-├── .gitignore    # Git ignore rules
+├── backend/        # NestJS API, WebSockets, AI orchestration
+├── frontend/       # React SPA (Vite)
+├── docs/           # Reference material
+├── docker-compose.yml
+└── README.md
 ```
 
-## Architecture Overview
+## Run with Docker Compose
 
-```
-            Browser (http://localhost:8080)
-                       │
-                       ▼
-                ┌────────────┐
-                │   Nginx    │ Reverse proxy
-                └────┬───────┘
-          static /    │    \  /api,/ws
-        ┌─────────┐   │     ┌────────────┐
-        │ Frontend│◄──┘     │  Backend   │ (ASGI + Celery)
-        │ (Nginx) │         └────┬───────┘
-        └─────────┘              │
-                                  ▼
-                         ┌────────────┐
-                         │ PostgreSQL │
-                         └────────────┘
-                         ┌────────────┐
-                         │   Redis    │ (Celery + Channels)
-                         └────────────┘
-```
-
-- **backend**: Django ASGI app served by Gunicorn+Uvicorn, exposes REST + WebSockets.
-- **celery**: Worker that executes generation tasks; shares the exact code volume with `backend` for hot reload.
-- **frontend**: Static React bundle (Nginx) that Nginx proxies to; optional `frontend-dev` profile runs the Vite dev server.
-- **nginx**: Edge proxy that exposes a single public port, forwards `/api` + `/ws` to backend, and all other paths to the SPA.
-- **db / redis**: Stateful services with dedicated named volumes.
-
-## Environment Variables
-
-Copy `.env.example` to `.env` at the repo root and customize as needed:
-
-```bash
-cp .env.example .env
-```
-
-Key values (all of them ship with sensible defaults in the example file):
-
-| Variable                 | Purpose                                                                                                                                           |
-| ------------------------ | ------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `SECRET_KEY`             | Django secret; change before deploying.                                                                                                           |
-| `DEBUG`                  | Turns on Django debug features inside the container.                                                                                              |
-| `DJANGO_DEV_SERVER`      | Forces `manage.py runserver` + hot reload when set to `1`. Leave `0` for production (Gunicorn).                                                   |
-| `POSTGRES_*` + `DB_*`    | Database credentials shared by Django and Postgres.                                                                                               |
-| `REDIS_URL` / `CELERY_*` | Broker/result URLs for Celery + Channels.                                                                                                         |
-| `OPENAI_API_KEY`         | Used by the LangChain creator/reviewer agents.                                                                                                    |
-| `VITE_API_BASE_URL`      | API base URL baked into the frontend during `npm run build` (use `/api` when running behind Nginx, or `http://localhost:8000/api` for local dev). |
-| `VITE_WS_BASE_URL`       | WebSocket base URL (`ws://localhost:8080/ws` for Docker, `ws://localhost:8000/ws` locally).                                                       |
-
-The backend-specific sample (`backend/.env.example`) is still available if you prefer running Django outside Docker.
-
-## Quick Start (Docker Compose)
-
-1. **Bootstrap environment**
+1. Copy the example environment file (this single `.env` powers both Docker Compose and the backend container) and adjust credentials/API keys as needed:
 
    ```bash
    cp .env.example .env
    ```
 
-   Adjust credentials/keys, then (optionally) set `DJANGO_DEV_SERVER=1` if you want Django's auto-reload instead of Gunicorn.
-
-2. **Build and run the full stack**
+2. Build the images and start every service (Postgres, backend, frontend). Add `-d` if you prefer detached mode:
 
    ```bash
    docker compose up --build
    ```
 
-   The following endpoints become available:
+   - Frontend UI: `http://localhost:4173`
+   - Backend REST + Swagger: `http://localhost:3000/api` and `/api/docs`
+   - PostgreSQL: `localhost:${DATABASE_HOST_PORT:-5435}`
 
-   - App UI: `http://localhost:8080`
-   - Direct Django API (if needed): `http://localhost:8000`
-   - Postgres: `localhost:5435`
-   - Redis: `localhost:6379`
-
-3. **Create your first superuser** (only once)
+3. Confirm the stack is healthy and inspect logs as needed:
 
    ```bash
-   docker compose exec backend python manage.py createsuperuser
+   docker compose ps
+   docker compose logs -f backend   # follow API logs
+   docker compose logs -f frontend  # follow nginx logs
+   docker compose logs -f db        # optional: database startup/seed info
    ```
 
-4. **Watch logs / tail workers**
-   ```bash
-   docker compose logs -f backend
-   docker compose logs -f celery
-   ```
-
-### Hot Reload Profile
-
-- Keep `backend` + `celery` services mounted to `./backend` for instant reloads when `DJANGO_DEV_SERVER=1`.
-- For live React edits, launch the dev profile which runs `npm run dev` inside a lightweight Node container tied to your local source:
-  ```bash
-  docker compose --profile dev up frontend-dev
-  ```
-  Visit `http://localhost:5173`; API/websocket calls still proxy through the same backend.
-
-Tear everything down with `docker compose down -v` when you're done.
-
-## Prerequisites
-
-Make sure the following are installed locally:
-
-- Python **3.11**
-- [Poetry](https://python-poetry.org/) **1.7+**
-- Node.js **18+** (project developed with Node 20)
-- npm **10+** (or pnpm/yarn if you prefer)
-- PostgreSQL **14+** with a reachable database user
-- Redis **6+** (used by Celery and Django Channels)
-- An OpenAI (or other supported LLM) API key for AI generation
-
-> Tip: On macOS you can install Postgres + Redis using Homebrew (`brew install postgresql@14 redis`). Remember to have both services running before you start the app.
-
-## Backend Setup (Django + Celery)
-
-1. **Install dependencies**
+4. Stop or clean up when you're done:
 
    ```bash
-   cd backend
-   poetry install
+   docker compose down              # stop containers
+   docker compose down -v           # stop + remove the Postgres volume
+   docker compose down -v --rmi all # full reset (images + data)
    ```
 
-2. **Create the environment file** `backend/.env` (Poetry automatically reads it through `python-decouple`). Adjust values to match your local credentials:
-
-   ```ini
-   SECRET_KEY=django-insecure-dev-key
-   DEBUG=True
-   ALLOWED_HOSTS=localhost,127.0.0.1
-
-   DB_NAME=coursecraft_db
-   DB_USER=coursecraft_user
-   DB_PASSWORD=coursecraft_pass
-   DB_HOST=localhost
-   DB_PORT=5432
-
-   CORS_ALLOWED_ORIGINS=http://localhost:5173
-
-   CELERY_BROKER_URL=redis://localhost:6379/0
-   CELERY_RESULT_BACKEND=redis://localhost:6379/0
-   REDIS_URL=redis://localhost:6379/0
-
-   OPENAI_API_KEY=sk-your-key
-   # Optional: other provider keys (ANTHROPIC_API_KEY, GOOGLE_API_KEY, etc.)
-   ```
-
-3. **Provision the Postgres database** (example using psql; replace credentials as needed):
+5. Need to restart just one service after code changes? Rebuild that image and let Compose recreate it automatically:
 
    ```bash
-   createuser coursecraft_user --pwprompt
-   createdb coursecraft_db --owner coursecraft_user
+   docker compose build backend
+   docker compose up backend
    ```
 
-4. **Apply migrations and create a superuser**
+### Services
 
-   ```bash
-   poetry run python manage.py migrate
-   poetry run python manage.py createsuperuser
-   ```
+| Service    | Ports (host → container)             | Description                                       |
+| ---------- | ------------------------------------ | ------------------------------------------------- |
+| `db`       | `${DATABASE_HOST_PORT:-5435} → 5432` | PostgreSQL 16 with a named `postgres_data` volume |
+| `backend`  | `${BACKEND_PORT:-3000} → 3000`       | NestJS API built from `backend/Dockerfile`        |
+| `frontend` | `${FRONTEND_PORT:-4173} → 80`        | Nginx container serving the Vite build            |
 
-5. **Run the Django API/Channels server (ASGI)**
+The frontend build arguments `VITE_API_BASE_URL` and `VITE_WS_BASE_URL` default to `http://backend:3000/api` and `ws://backend:3000`, so containers can talk over the Compose network without extra configuration.
 
-   ```bash
-   poetry run python manage.py runserver
-   ```
+## Environment Variables
 
-   The API is available at `http://localhost:8000/api`, and WebSockets share the same origin at `/ws/...`.
+- The root `.env` (based on `.env.example`) feeds both Docker Compose and the backend container.
+- `DATABASE_*` values configure the Postgres container and are reused by TypeORM.
+- `BACKEND_DATABASE_HOST` / `BACKEND_DATABASE_PORT` override the in-container connection target (defaults to `db:5432`).
+- `FRONTEND_ALLOW_ORIGIN` defines the `Access-Control-Allow-Origin` header served by nginx (defaults to `*`).
+- Update `OPENAI_API_KEY` (and optionally `GEMINI_API_KEY`) with a real key before using AI generation.
+- `CORS_ORIGIN` / `SOCKET_IO_CORS_ORIGIN` should match the URL you open in the browser (defaults to `http://localhost:4173`).
+- `VITE_API_BASE_URL` and `VITE_WS_BASE_URL` are compile-time values consumed by Vite during `npm run build`.
 
-6. **Start the Celery worker** (required for course generation jobs):
-   ```bash
-   poetry run celery -A config worker -l info
-   ```
-   Keep this process running alongside the Django server. Celery reads the same `.env` file so Redis/Postgres credentials stay in sync.
+For local-only experiments, you can still use `backend/.env.example` and `frontend/.env.example` separately, but keeping everything in the root `.env` simplifies Docker usage.
 
-## Frontend Setup (React + Vite)
+## Local (non-Docker) Development
 
-1. **Install dependencies**
+### Backend
 
-   ```bash
-   cd frontend
-   npm install
-   ```
+```bash
+cd backend
+npm install
+cp .env.example .env  # if you have not already
+npm run start:dev
+```
 
-2. **Configure frontend environment variables** in `frontend/.env.local` (Vite automatically loads this file):
+- API base URL: `http://localhost:3000/api`
+- Swagger docs: `http://localhost:3000/api/docs`
+- Runs with file watching via `ts-node` and Nest CLI.
 
-   ```ini
-   VITE_API_BASE_URL=http://localhost:8000/api
-   VITE_WS_BASE_URL=ws://localhost:8000/ws
-   ```
+### Frontend
 
-3. **Start the development server**
-   ```bash
-   npm run dev
-   ```
-   Vite serves the app at `http://localhost:5173`. The dev server proxies API calls to the backend base URL you configured.
+```bash
+cd frontend
+npm install
+cp .env.example .env  # sets VITE_* defaults
+npm run dev
+```
 
-## Running the Full Stack Locally
+- Dev server: `http://localhost:5173`
+- Update `VITE_API_BASE_URL` to match however you run the backend locally.
 
-Open three terminal tabs/windows:
+### Run the entire stack locally
 
-1. **Postgres + Redis** running locally (via services or Docker)
-2. **Backend**
-   ```bash
-   cd backend
-   poetry run python manage.py runserver
-   ```
-3. **Celery Worker**
-   ```bash
-   cd backend
-   poetry run celery -A config worker -l info
-   ```
-4. **Frontend**
-   ```bash
-   cd frontend
-   npm run dev
-   ```
+If you want to run both apps without Docker, keep the backend and frontend processes in separate terminals (or use a process manager like `npm-run-all`). From the repo root you can launch each side without changing directories:
 
-Navigate to `http://localhost:5173` to log in (use the superuser you created) and start generating courses. The frontend automatically opens a WebSocket connection (`ws://localhost:8000/ws/generation/<course_id>/`) to stream task progress.
+```bash
+# Terminal 1: start the API + websockets
+npm --prefix backend install
+cp backend/.env.example backend/.env  # required once
+npm --prefix backend run start:dev
 
-## Testing & Quality Checks
+# Terminal 2: start the Vite dev server
+npm --prefix frontend install
+cp frontend/.env.example frontend/.env  # required once
+npm --prefix frontend run dev
+```
 
-- **Backend unit tests**
-  ```bash
-  cd backend
-  poetry run python manage.py test
-  ```
-- **Frontend linting**
-  ```bash
-  cd frontend
-  npm run lint
-  ```
-- **Formatting (optional)**
-  ```bash
-  cd frontend
-  npm run format
-  ```
+Keep both terminals open while developing; changes in either app hot-reload automatically. Point the frontend to `http://localhost:3000/api` (default) so UI requests hit the local backend.
+
+## Useful Docker Commands
+
+- `docker compose build backend` – rebuild only the backend image after code changes
+- `docker compose up frontend --build` – rebuild and start just the frontend
+- `docker compose exec backend npm run migration:run` – run TypeORM migrations inside the container
+- `docker compose logs -f db` – inspect Postgres output/healthcheck state
 
 ## Troubleshooting
 
-- **Celery cannot connect to Redis**: make sure Redis is running and the `CELERY_BROKER_URL`/`REDIS_URL` values point to the correct host/DB.
-- **CORS/CSRF errors**: ensure `CORS_ALLOWED_ORIGINS` in `backend/.env` includes the exact scheme + port used by Vite (e.g., `http://localhost:5173`).
-- **WebSocket auth issues**: the frontend appends `?token=<auth_token>` automatically. Verify that your token is still valid and that the user is authenticated.
-- **LLM errors or empty responses**: confirm the API key you supplied has access to the requested model. For development you can stub responses by adjusting the AI services in `backend/ai_generation/`.
+- **Backend exits immediately**: confirm `DATABASE_HOST`, `DATABASE_USERNAME`, and `DATABASE_PASSWORD` match the Postgres container values.
+- **Frontend cannot reach the API**: ensure `VITE_API_BASE_URL` was set to `http://backend:3000/api` at build time (clean `frontend/dist` and rebuild the image if you change it).
+- **Migrations fail on first run**: delete the `postgres_data` volume (`docker compose down -v`), then spin the stack up again so the schema is recreated from scratch.
+- **AI provider errors**: double-check that the relevant API key env var is non-empty; most providers reject the default placeholder key immediately.
 
-## Next Steps
+## Development Status
 
-- Seed sample data via Django admin to explore the UI faster
-- Configure additional LLM providers by adding keys to the environment and enabling them in the admin (`LLMConfig` model)
-- Deploy the Docker Compose stack to a remote host (Fly.io, Render, ECS, etc.) and plug in production secrets
+- Branch: `node-implementation`
+- Containers: `frontend`, `backend`, `db`
+- Compose file: `docker-compose.yml`
 
-## API Reference
-
-### Authentication
-
-| Method | Endpoint            | Purpose               |
-| ------ | ------------------- | --------------------- |
-| `POST` | `/api/auth/login/`  | Obtain auth token.    |
-| `POST` | `/api/auth/logout/` | Revoke current token. |
-| `GET`  | `/api/auth/user/`   | Current user info.    |
-
-### Courses & Publishing
-
-| Method   | Endpoint                       | Notes                                       |
-| -------- | ------------------------------ | ------------------------------------------- |
-| `POST`   | `/api/courses/`                | Create a course and kick off AI generation. |
-| `GET`    | `/api/courses/`                | List with search, pagination, filters.      |
-| `GET`    | `/api/courses/{id}/`           | Course detail (nested modules/quiz).        |
-| `PATCH`  | `/api/courses/{id}/`           | Update title/description/status fields.     |
-| `DELETE` | `/api/courses/{id}/`           | Remove course + related content.            |
-| `POST`   | `/api/courses/{id}/publish/`   | Draft → Published.                          |
-| `POST`   | `/api/courses/{id}/unpublish/` | Published → Draft.                          |
-
-### Regeneration
-
-| Method | Endpoint                                            | Body                              |
-| ------ | --------------------------------------------------- | --------------------------------- |
-| `POST` | `/api/courses/{id}/modules/{module_id}/regenerate/` | `{ "feedback": "optional text" }` |
-| `POST` | `/api/courses/{id}/quiz/regenerate/`                | `{ "feedback": "optional text" }` |
-
-### Quiz & Questions
-
-| Method   | Endpoint                            | Purpose                        |
-| -------- | ----------------------------------- | ------------------------------ |
-| `POST`   | `/api/courses/{id}/quiz/questions/` | Add question + answers.        |
-| `GET`    | `/api/courses/{id}/quiz/questions/` | List questions for a course.   |
-| `PATCH`  | `/api/questions/{id}/`              | Edit an existing question.     |
-| `DELETE` | `/api/questions/{id}/`              | Remove a question and answers. |
-
-### Generation Tasks
-
-| Method | Endpoint                           | Purpose                                        |
-| ------ | ---------------------------------- | ---------------------------------------------- |
-| `GET`  | `/api/generation-tasks/{task_id}/` | Poll the status/progress of a background task. |
-
-## WebSocket Messages
-
-- Connect via `ws://localhost:8080/ws/generation/{course_id}/?token=<auth_token>` when running in Docker (or `ws://localhost:8000/...` locally).
-- Message payload:
-
-```json
-{
-	"type": "generation_status",
-	"data": {
-		"status": "running",
-		"stage": "reviewing",
-		"progress": 66,
-		"message": "Reviewing content..."
-	}
-}
-```
-
-`stage` cycles through `creating`, `reviewing`, `refining`, and `completed`. When `status` becomes `completed` (or `failed`) the Celery task updates the database and the frontend refreshes automatically.
+Feel free to extend the stack (e.g., add Redis, workers, or a reverse proxy) by creating additional services in the same Compose file.

@@ -1,10 +1,9 @@
 import { useState } from 'react';
 import type { FormEvent } from 'react';
-import { useNavigate, useLocation } from 'react-router-dom';
+import { useNavigate, useLocation, Link } from 'react-router-dom';
 import { Input } from '@/components/ui/Input';
 import { Button } from '@/components/ui/Button';
 import { Card, CardBody } from '@/components/ui/Card';
-import { showError } from '@/utils/toast';
 import { useAuth } from '@/context/AuthContext';
 
 interface FormData {
@@ -91,8 +90,8 @@ function Login() {
 
       // Redirect to the page they were trying to access, or home
       navigate(from, { replace: true });
-    } catch (error) {
-      showError(error instanceof Error ? error.message : 'Login failed. Please try again.');
+    } catch {
+      // Error is already handled and displayed by AuthContext
     } finally {
       setLoading(false);
     }
@@ -152,6 +151,18 @@ function Login() {
               >
                 {loading ? 'Signing in...' : 'Sign in'}
               </Button>
+
+              <div className="text-center mt-4">
+                <p className="text-sm text-gray-600">
+                  Don't have an account?{' '}
+                  <Link
+                    to="/signup"
+                    className="text-primary-600 hover:text-primary-700 font-medium"
+                  >
+                    Sign up
+                  </Link>
+                </p>
+              </div>
             </form>
           </CardBody>
         </Card>

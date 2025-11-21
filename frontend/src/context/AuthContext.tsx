@@ -39,20 +39,33 @@ export function AuthProvider({ children }: AuthProviderProps) {
       const storedUser = localStorage.getItem('user');
 
       if (storedToken && storedUser) {
-        // Verify token is still valid
+        // Verify token is still valid by calling the backend
         try {
           const response = await authApi.me();
-          setToken(storedToken);
-          setUser(response.data);
-          localStorage.setItem('user', JSON.stringify(response.data));
+
+          // Successfully verified - update state with fresh user data
+          if (response.success && response.data) {
+            setToken(storedToken);
+            setUser(response.data);
+            localStorage.setItem('user', JSON.stringify(response.data));
+          } else {
+            // Invalid response format, clear auth
+            console.error('Invalid auth response format:', response);
+            localStorage.removeItem('authToken');
+            localStorage.removeItem('user');
+            setToken(null);
+            setUser(null);
+          }
         } catch (error) {
-          // Token is invalid, clear storage
+          // Token is invalid or expired, clear storage
+          console.log('Token validation failed, logging out');
           localStorage.removeItem('authToken');
           localStorage.removeItem('user');
           setToken(null);
           setUser(null);
         }
       } else {
+        // No stored credentials
         setToken(null);
         setUser(null);
       }
@@ -71,10 +84,10 @@ export function AuthProvider({ children }: AuthProviderProps) {
       const response = await authApi.register(username, email, password);
 
       // Store token and user
-      localStorage.setItem('authToken', response.data.token);
+      localStorage.setItem('authToken', response.data.accessToken);
       localStorage.setItem('user', JSON.stringify(response.data.user));
 
-      setToken(response.data.token);
+      setToken(response.data.accessToken);
       setUser(response.data.user);
 
       showSuccess('Registration successful! Welcome to CourseCraft.');
@@ -88,12 +101,11 @@ export function AuthProvider({ children }: AuthProviderProps) {
   const login = async (email: string, password: string) => {
     try {
       const response = await authApi.login(email, password);
-
       // Store token and user
-      localStorage.setItem('authToken', response.data.token);
+      localStorage.setItem('authToken', response.data.accessToken);
       localStorage.setItem('user', JSON.stringify(response.data.user));
 
-      setToken(response.data.token);
+      setToken(response.data.accessToken);
       setUser(response.data.user);
 
       showSuccess('Login successful! Welcome back.');
@@ -106,9 +118,7 @@ export function AuthProvider({ children }: AuthProviderProps) {
   // Logout function
   const logout = async () => {
     try {
-      await authApi.logout();
-
-      // Clear localStorage
+      // Clear localStorage (no API call needed for NestJS)
       localStorage.removeItem('authToken');
       localStorage.removeItem('user');
 

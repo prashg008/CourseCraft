@@ -51,7 +51,9 @@ export function Sidebar({ isOpen, onClose }: SidebarProps) {
   const handleHelpSubmit = () => {
     const subject = encodeURIComponent(helpForm.title);
     const body = encodeURIComponent(helpForm.description);
-    window.location.href = `mailto:support@example.com?subject=${subject}&body=${body}`;
+    const url = `mailto:support@prashanth.com?subject=${subject}&body=${body}`;
+    window.open(url, '_blank');
+
     setShowHelpModal(false);
     setHelpForm({ title: '', description: '' });
   };
