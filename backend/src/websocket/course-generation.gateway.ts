@@ -204,8 +204,8 @@ export class CourseGenerationGateway implements OnGatewayConnection, OnGatewayDi
 
   // Helper to determine current stage based on progress
   private determineStage(progress: number): string {
-    if (progress < 30) return 'creating';
-    if (progress < 60) return 'reviewing';
+    if (progress < 40) return 'creating';
+    if (progress < 70) return 'reviewing';
     if (progress < 90) return 'refining';
     return 'completed';
   }

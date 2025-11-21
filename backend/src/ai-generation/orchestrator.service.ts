@@ -22,7 +22,11 @@ export class OrchestratorService {
     private readonly reviewerAgent: ReviewerAgent,
   ) {}
 
-  async orchestrateCourseGeneration(title: string, description: string): Promise<CourseOutput> {
+  async orchestrateCourseGeneration(
+    title: string,
+    description: string,
+    onReviewStarted?: () => void,
+  ): Promise<CourseOutput> {
     this.logger.log(`Starting course generation orchestration: ${title}`);
     const originalPrompt = formatCourseGenerationPrompt(title, description);
 
@@ -41,7 +45,8 @@ export class OrchestratorService {
         } else {
           // Subsequent attempts - revise based on feedback
           const review = await this.reviewerAgent.reviewContent(currentContent, originalPrompt);
-
+          // eslint-disable-next-line @typescript-eslint/no-unused-expressions
+          onReviewStarted && onReviewStarted();
           currentContent = await this.reviewerAgent.reviseContent(
             currentContent,
             review.qualityScore,

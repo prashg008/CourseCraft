@@ -9,6 +9,7 @@ import { Quiz } from '../courses/entities/quiz.entity';
 import { Question, QuestionType } from '../courses/entities/question.entity';
 import { Answer } from '../courses/entities/answer.entity';
 import { CourseGenerationGateway } from '../websocket/course-generation.gateway';
+import { on } from 'events';
 
 @Injectable()
 export class AiGenerationService {
@@ -114,9 +115,18 @@ export class AiGenerationService {
       this.logger.log('Generating course content...');
       this.gateway.emitCourseProgress(courseId, 20, 'Generating course content with AI...');
 
+      const reviewStarted = () => {
+        this.gateway.emitCourseProgress(
+          courseId,
+          40,
+          'Course content generated, review in progress...',
+        );
+      };
+
       const generatedCourse = await this.orchestratorService.orchestrateCourseGeneration(
         title,
         description,
+        reviewStarted,
       );
 
       this.gateway.emitCourseProgress(
